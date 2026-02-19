@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "zip": "npm run build && powershell -NoProfile -Command \"Compress-Archive -Path dist\\* -DestinationPath zeropin.zip -Force\""
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^1.7.7",

@@ -2,9 +2,8 @@
   "manifest_version": 3,
   "name": "ZeroPin",
   "version": "0.1.0",
-  "description": "Save and organize web and AI bookmarks locally.",
-  "permissions": ["contextMenus", "storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "description": "Local-first bookmark and snippet manager for web pages and AI chats.",
+  "permissions": ["contextMenus", "storage", "tabs", "activeTab"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

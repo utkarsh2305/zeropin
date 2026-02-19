@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="circleStroke" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#5b21b6" />
+    </linearGradient>
+    <linearGradient id="circleFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5f3ff" />
+      <stop offset="100%" stop-color="#ede9fe" />
+    </linearGradient>
+    <linearGradient id="pinGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#6d28d9" />
+    </linearGradient>
+    <clipPath id="bottomHalf">
+      <rect x="0" y="64" width="128" height="64" />
+    </clipPath>
+  </defs>
+  <!-- Circle background -->
+  <circle cx="64" cy="64" r="56" fill="url(#circleFill)" stroke="url(#circleStroke)" stroke-width="6" />
+  <!-- Extra thickness at bottom of circle -->
+  <circle cx="64" cy="64" r="56" fill="none" stroke="url(#circleStroke)" stroke-width="10" clip-path="url(#bottomHalf)" />
+  <!-- Pin: combined head + needle as a single shape for clarity at small sizes -->
+  <!-- Pin head (larger, moved up slightly) -->
+  <circle cx="64" cy="44" r="18" fill="url(#pinGrad)" />
+  <!-- Pin head highlight -->
+  <circle cx="57" cy="38" r="6" fill="#c4b5fd" opacity="0.6" />
+  <!-- Pin needle - thick tapered shape -->
+  <polygon points="58,60 70,60 64,100" fill="url(#pinGrad)" />
+</svg>

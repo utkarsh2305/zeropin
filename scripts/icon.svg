@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Purple gradient for the pin body -->
+    <linearGradient id="pinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="50%" stop-color="#9333ea"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <!-- Darker gradient for the pin head -->
+    <linearGradient id="headGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <!-- Background circle gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#581c87" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0.1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer circle -->
+  <circle cx="64" cy="64" r="56" fill="url(#bgGrad)" stroke="#3b0764" stroke-width="5"/>
+
+  <!-- Pushpin group, tilted ~35 degrees -->
+  <g transform="translate(64,64) rotate(35) translate(-64,-64)">
+    <!-- Pin needle (the spike) -->
+    <path d="M64,78 L60,108 L64,112 L68,108 Z" fill="url(#pinGrad)" opacity="0.9"/>
+
+    <!-- Pin shaft -->
+    <rect x="60" y="50" width="8" height="30" rx="2" fill="url(#pinGrad)"/>
+
+    <!-- Pin collar/ring where head meets shaft -->
+    <ellipse cx="64" cy="50" rx="12" ry="5" fill="#7c3aed"/>
+
+    <!-- Pin head (round disc) -->
+    <ellipse cx="64" cy="38" rx="18" ry="14" fill="url(#headGrad)"/>
+
+    <!-- Highlight on pin head -->
+    <ellipse cx="58" cy="34" rx="8" ry="5" fill="#c084fc" opacity="0.5"/>
+  </g>
+</svg>

@@ -56,7 +56,7 @@ interface SnippetAnchor {
   repairedAt?: number;
 }
 
-const FUZZY_SIMILARITY_MIN = 0.6;
+const FUZZY_SIMILARITY_MIN = 0.5;
 const PREFIX_SUFFIX_LENGTH = 50;
 const FINGERPRINT_FRAG_LENGTH = 30;
 const HIGHLIGHT_DURATION_MS = 3000;
@@ -298,6 +298,7 @@ interface HighlightResult {
 function findByExactMatch(text: string, root: Node = document.body): Range | null {
   const regex = new RegExp(escapeRegex(text));
 
+  // Fast path: match within a single text node
   for (const node of walkTextNodes(root)) {
     const nodeText = node.textContent ?? "";
     const match = nodeText.match(regex);
@@ -307,6 +308,13 @@ function findByExactMatch(text: string, root: Node = document.body): Range | nul
     }
   }
 
+  // Cross-node fallback: search in concatenated textContent
+  const fullText = root.textContent ?? "";
+  const match = fullText.match(regex);
+  if (match && match.index != null) {
+    return rangeFromOffsets(root, match.index, match.index + text.length);
+  }
+
   return null;
 }
 
@@ -314,6 +322,7 @@ function findAllMatches(text: string, root: Node = document.body): Array<{ range
   const matches: Array<{ range: Range; node: Text; index: number }> = [];
   const regex = new RegExp(escapeRegex(text), "g");
 
+  // Fast path: single text node matches
   for (const node of walkTextNodes(root)) {
     const nodeText = node.textContent ?? "";
     let match;
@@ -324,6 +333,24 @@ function findAllMatches(text: string, root: Node = document.body): Array<{ range
         node,
         index: match.index,
       });
+    }
+  }
+
+  // Cross-node fallback: search in concatenated textContent
+  if (matches.length === 0) {
+    const fullText = root.textContent ?? "";
+    const regex2 = new RegExp(escapeRegex(text), "g");
+    let match;
+    while ((match = regex2.exec(fullText)) !== null) {
+      const range = rangeFromOffsets(root, match.index, match.index + text.length);
+      if (range) {
+        const startNode = range.startContainer;
+        matches.push({
+          range,
+          node: (startNode.nodeType === Node.TEXT_NODE ? startNode : startNode) as Text,
+          index: match.index,
+        });
+      }
     }
   }
 
@@ -357,9 +384,9 @@ function findBestFuzzyMatch(
   text: string,
   root: Node = document.body,
 ): { range: Range; similarity: number } | null {
-  let bestMatch: { range: Range; similarity: number; matched: string } | null =
-    null;
+  let bestMatch: { range: Range; similarity: number } | null = null;
 
+  // Fast path: single text node sliding window
   for (const node of walkTextNodes(root)) {
     const nodeText = node.textContent ?? "";
 
@@ -367,15 +394,29 @@ function findBestFuzzyMatch(
       const candidate = nodeText.substring(i, i + text.length);
       const similarity = jaroWinklerSimilarity(text, candidate);
 
-      if (
-        !bestMatch ||
-        similarity > bestMatch.similarity
-      ) {
+      if (!bestMatch || similarity > bestMatch.similarity) {
         bestMatch = {
           range: createRangeFromMatch(node, { 0: candidate, index: i }),
           similarity,
-          matched: candidate,
         };
+      }
+    }
+  }
+
+  // Skip cross-node if single-node already found a strong match
+  if (bestMatch && bestMatch.similarity >= 0.85) return bestMatch;
+
+  // Cross-node fallback: use normalized doc text (O(n) substring search)
+  // instead of expensive O(n*m) sliding-window Jaro-Winkler
+  const docMap = buildNormalizedDocText(root);
+  const normText = normalizeText(text);
+  const idx = docMap.normalized.indexOf(normText);
+  if (idx !== -1) {
+    const range = docTextToRange(docMap, idx, idx + normText.length);
+    if (range) {
+      const similarity = normalizedSimilarity(range.toString(), text);
+      if (!bestMatch || similarity > bestMatch.similarity) {
+        bestMatch = { range, similarity };
       }
     }
   }
@@ -436,12 +477,21 @@ function findByChatContext(
 
   // Search within the message container for the text
   const regex = new RegExp(escapeRegex(text));
+
+  // Fast path: single text node
   for (const node of walkTextNodes(messageEl)) {
     const nodeText = node.textContent ?? "";
     const match = nodeText.match(regex);
     if (match) {
       return createRangeFromMatch(node, match);
     }
+  }
+
+  // Cross-node fallback within message container
+  const fullText = messageEl.textContent ?? "";
+  const match = fullText.match(regex);
+  if (match && match.index != null) {
+    return rangeFromOffsets(messageEl, match.index, match.index + text.length);
   }
 
   return null;
@@ -481,8 +531,8 @@ function findByFingerprint(
 
 // ── Confidence thresholds ──
 
-const CONFIDENCE_HIGH = 0.85;
-const CONFIDENCE_LOW = 0.65;
+const CONFIDENCE_HIGH = 0.75;
+const CONFIDENCE_LOW = 0.5;
 
 // ── Run stages A-F scoped to a given root node ──
 
@@ -522,7 +572,7 @@ function runStages(anchor: SnippetAnchor, root: Node, containerBoost: number): H
     const posRange = rangeFromOffsets(root, anchor.startOffset, anchor.endOffset);
     if (posRange) {
       const similarity = normalizedSimilarity(posRange.toString(), anchor.text);
-      if (similarity > 0.7) {
+      if (similarity > 0.55) {
         return { found: true, confidence: Math.min(1.0, similarity + containerBoost), stage: "D", range: posRange };
       }
     }
@@ -533,7 +583,7 @@ function runStages(anchor: SnippetAnchor, root: Node, containerBoost: number): H
     const fpRange = findByFingerprint(anchor.fingerprint, root);
     if (fpRange) {
       const similarity = normalizedSimilarity(fpRange.toString(), anchor.text);
-      if (similarity > 0.5) {
+      if (similarity > 0.4) {
         const baseConf = 0.5 + similarity * 0.3;
         return { found: true, confidence: Math.min(1.0, baseConf + containerBoost), stage: "E", range: fpRange };
       }
@@ -697,6 +747,177 @@ function showLowConfidenceNotice(): void {
   }, 3000);
 }
 
+// ── Floating snippet card for AI chat pages ──
+
+const SNIPPET_CARD_DURATION_MS = 12000;
+const SNIPPET_CARD_MAX_LENGTH = 400;
+
+const CARD_THEMES = {
+  dark: {
+    bg: "#1a1a2e",
+    text: "#e0e0e0",
+    brand: "#a78bfa",
+    border: "rgba(139,92,246,0.4)",
+    shadow: "rgba(0,0,0,0.4)",
+    context: "#999",
+    snippetText: "#d4d4d8",
+    snippetBg: "rgba(255,255,255,0.05)",
+    tip: "#e0e0e0",
+    note: "#e0e0e0",
+    dismiss: "#888",
+  },
+  light: {
+    bg: "#ffffff",
+    text: "#1a1a1a",
+    brand: "#7c3aed",
+    border: "rgba(139,92,246,0.3)",
+    shadow: "rgba(0,0,0,0.12)",
+    context: "#666",
+    snippetText: "#374151",
+    snippetBg: "rgba(0,0,0,0.04)",
+    tip: "#1a1a1a",
+    note: "#1a1a1a",
+    dismiss: "#999",
+  },
+};
+
+function getSnippetCardTheme(): Promise<typeof CARD_THEMES.dark> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get("zp_ui_prefs", (items) => {
+      const prefs = items["zp_ui_prefs"] as { darkMode?: string } | undefined;
+      const pref = prefs?.darkMode ?? "system";
+      let isDark: boolean;
+      if (pref === "system") {
+        isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      } else {
+        isDark = pref === "dark";
+      }
+      resolve(isDark ? CARD_THEMES.dark : CARD_THEMES.light);
+    });
+  });
+}
+
+async function showSnippetCard(anchor: SnippetAnchor): Promise<void> {
+  const existing = document.getElementById("zp-snippet-card");
+  if (existing) existing.remove();
+
+  const t = await getSnippetCardTheme();
+
+  const card = document.createElement("div");
+  card.id = "zp-snippet-card";
+
+  // Truncate long snippets
+  let displayText = anchor.text;
+  if (displayText.length > SNIPPET_CARD_MAX_LENGTH) {
+    displayText = displayText.slice(0, SNIPPET_CARD_MAX_LENGTH) + "…";
+  }
+
+  // Build context line
+  const parts: string[] = [];
+  if (anchor.chatContext?.platform && anchor.chatContext.platform !== "unknown") {
+    parts.push(anchor.chatContext.platform.charAt(0).toUpperCase() + anchor.chatContext.platform.slice(1));
+  }
+  if (anchor.chatContext?.role) {
+    parts.push(anchor.chatContext.role === "assistant" ? "AI response" : "Your prompt");
+  }
+  if (anchor.chatContext?.conversationTitle) {
+    parts.push(`"${anchor.chatContext.conversationTitle}"`);
+  }
+  const contextLine = parts.length > 0 ? parts.join(" · ") : "";
+
+  // Card container
+  card.style.cssText = [
+    "position:fixed", "bottom:20px", "right:20px", "z-index:2147483647",
+    "max-width:480px", "width:calc(100% - 40px)",
+    `background:${t.bg}`, `color:${t.text}`,
+    `border:1px solid ${t.border}`, "border-radius:12px",
+    "padding:16px", "font-family:system-ui,-apple-system,sans-serif",
+    `box-shadow:0 8px 32px ${t.shadow}`, "cursor:default",
+    "opacity:0", "transition:opacity 0.3s ease",
+  ].join(";");
+
+  // Header with ZeroPin branding + dismiss button
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;";
+
+  const brand = document.createElement("span");
+  brand.textContent = "📌 ZeroPin";
+  brand.style.cssText = `font-size:12px;font-weight:600;color:${t.brand};letter-spacing:0.5px;`;
+
+  const dismiss = document.createElement("button");
+  dismiss.textContent = "✕";
+  dismiss.style.cssText = [
+    "background:none", "border:none", `color:${t.dismiss}`, "cursor:pointer",
+    "font-size:16px", "padding:0 4px", "line-height:1",
+  ].join(";");
+  dismiss.addEventListener("click", () => {
+    card.style.opacity = "0";
+    setTimeout(() => card.remove(), 300);
+  });
+
+  header.appendChild(brand);
+  header.appendChild(dismiss);
+
+  // Context line
+  if (contextLine) {
+    const ctx = document.createElement("div");
+    ctx.textContent = contextLine;
+    ctx.style.cssText = `font-size:11px;color:${t.context};margin-bottom:8px;`;
+    card.appendChild(header);
+    card.appendChild(ctx);
+  } else {
+    card.appendChild(header);
+  }
+
+  // Snippet text
+  const textEl = document.createElement("div");
+  textEl.textContent = displayText;
+  textEl.style.cssText = [
+    "font-size:13px", "line-height:1.5", `color:${t.snippetText}`,
+    `background:${t.snippetBg}`, "border-radius:6px",
+    "padding:10px 12px", "max-height:160px", "overflow-y:auto",
+    "white-space:pre-wrap", "word-break:break-word",
+  ].join(";");
+  card.appendChild(textEl);
+
+  // Tip line (platform-aware shortcuts)
+  const isMac = /Macintosh|Mac OS/.test(navigator.userAgent);
+  const findKey = isMac ? "\u2318F" : "Ctrl+F";
+  const pasteKey = isMac ? "\u2318V" : "Ctrl+V";
+
+  const tip = document.createElement("div");
+  tip.textContent = `Use ${findKey} to find and ${pasteKey} to paste this text`;
+  tip.style.cssText = `font-size:12px;color:${t.tip};margin-top:8px;text-align:right;`;
+  card.appendChild(tip);
+
+  // Privacy note (builds confidence for clipboard permission prompt)
+  const note = document.createElement("div");
+  note.textContent = "ZeroPin copies pinned text to help you search. No data leaves your device.";
+  note.style.cssText = `font-size:11px;color:${t.note};margin-top:4px;text-align:right;font-style:italic;`;
+  card.appendChild(note);
+
+  document.body.appendChild(card);
+
+  // Fade in
+  requestAnimationFrame(() => { card.style.opacity = "1"; });
+
+  // Auto-copy first ~120 chars for Find use (one-time permission per domain)
+  const copyText = anchor.text.slice(0, 120);
+  navigator.clipboard.writeText(copyText).then(() => {
+    tip.textContent = `Copied to clipboard \u2014 use ${findKey} to find and ${pasteKey} to paste`;
+  }).catch(() => {
+    // Permission denied or not yet granted — keep fallback tip
+  });
+
+  // Auto-dismiss
+  setTimeout(() => {
+    if (card.parentNode) {
+      card.style.opacity = "0";
+      setTimeout(() => card.remove(), 300);
+    }
+  }, SNIPPET_CARD_DURATION_MS);
+}
+
 // ── Highlight and scroll ──
 
 function highlightAndScroll(result: HighlightResult): void {
@@ -830,6 +1051,33 @@ function waitForDomStable(
   });
 }
 
+// ── AI chat domain detection ──
+
+const AI_CHAT_DOMAINS = new Set([
+  "chatgpt.com",
+  "chat.openai.com",
+  "claude.ai",
+  "gemini.google.com",
+  "bard.google.com",
+  "copilot.microsoft.com",
+  "poe.com",
+  "perplexity.ai",
+  "grok.com",
+  "x.com",
+  "deepseek.com",
+  "chat.deepseek.com",
+  "huggingface.co",
+  "chat.mistral.ai",
+]);
+
+function isAiChatDomain(): boolean {
+  try {
+    return AI_CHAT_DOMAINS.has(window.location.hostname.replace(/^www\./, ""));
+  } catch {
+    return false;
+  }
+}
+
 // ── Chat page detection for stabilization ──
 
 function isChatPage(anchor: SnippetAnchor): boolean {
@@ -886,6 +1134,14 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
   const maybeWrapped = anchor as unknown as { anchor?: SnippetAnchor };
   if (!anchor.text && maybeWrapped.anchor?.text) {
     anchor = maybeWrapped.anchor;
+  }
+
+  // AI chat pages: show floating snippet card instead of DOM search
+  // (virtual scrolling makes DOM text search unreliable on chat platforms)
+  if (isAiChatDomain()) {
+    showSnippetCard(anchor);
+    chrome.storage.local.remove("ZP_HIGHLIGHT_REQUEST");
+    return;
   }
 
   const doHighlight = () => {

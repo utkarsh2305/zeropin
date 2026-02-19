@@ -8,7 +8,9 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Right-click "Save to ZeroPin" or press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac)
 - Save full pages or selected text as snippet bookmarks
 - Snippets are highlighted when the page is reopened
-- AI chat detection: captures platform, role (user/assistant), and conversation metadata from ChatGPT, Claude, Gemini, Copilot, Poe, and Perplexity
+- AI chat detection: captures platform, role (user/assistant), and conversation metadata from ChatGPT, Claude, Gemini, Copilot, Poe, Perplexity, Grok, DeepSeek, and Mistral
+- AI chat pins show a floating snippet card with auto-copy to clipboard (Ctrl+F / ⌘F to find, Ctrl+V / ⌘V to paste)
+- Snippet card follows your selected theme (dark/light/system)
 
 **Library**
 - Folder hierarchy with collapsible tree and drag-and-drop reordering

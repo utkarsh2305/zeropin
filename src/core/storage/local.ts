@@ -29,22 +29,17 @@ function storageSet<T>(key: string, value: T): Promise<void> {
 }
 
 export async function getState(): Promise<LibraryState> {
-  console.log("ZP getState start");
-
   let state = await storageGet<LibraryState>(KEY);
 
   // Migration: read from old key if new key is empty
   if (!state) {
     const old = await storageGet<LibraryState>(OLD_KEY);
     if (old) {
-      console.log("ZP migrating from old storage key");
       await storageSet(KEY, old);
       chrome.storage.local.remove(OLD_KEY);
       state = old;
     }
   }
-
-  console.log("ZP getState loaded?", Boolean(state));
 
   if (state) {
     // Run versioned migrations
@@ -96,24 +91,13 @@ export async function getState(): Promise<LibraryState> {
     lastUsedFolderId: inboxId,
   };
 
-  console.log("ZP getState no state; writing initial");
   await storageSet(KEY, initial);
-  console.log("ZP getState wrote initial");
 
   return initial;
 }
 
 export async function setState(next: LibraryState): Promise<void> {
-  console.log("ZP setState writing", next);
-
   await storageSet(KEY, next);
-
-  const check = await storageGet<LibraryState>(KEY);
-  console.log("ZP setState written check", {
-    hasState: Boolean(check),
-    bookmarks: check ? Object.keys(check.bookmarks).length : 0,
-    folders: check ? Object.keys(check.folders).length : 0,
-  });
 }
 
 /** Normalize a URL for dedup: lowercase, strip trailing slash and fragment. */
@@ -146,8 +130,6 @@ export function computeSnippetHash(url: string, snippetText?: string): string {
 }
 
 export async function addPageBookmark(url: string, title: string): Promise<void> {
-  console.log("ZP addPageBookmark start", { url, title });
-
   const state = await getState();
   const folderId = state.inboxFolderId ?? state.rootFolderId;
   const hash = computeSnippetHash(url);
@@ -158,7 +140,6 @@ export async function addPageBookmark(url: string, title: string): Promise<void>
   );
   if (existing) {
     existing.updatedAt = now();
-    console.log("ZP addPageBookmark dedup hit", { existingId: existing.id });
     await setState(state);
     return;
   }
@@ -186,11 +167,7 @@ export async function addPageBookmark(url: string, title: string): Promise<void>
     snippetHash: hash,
   };
 
-  console.log("ZP addPageBookmark mutated state", { id, folderId, domain });
-
   await setState(state);
-
-  console.log("ZP addPageBookmark done");
 }
 
 export async function addSelectionBookmark(input: {
@@ -242,7 +219,6 @@ export async function addSelectionBookmark(input: {
   );
   if (existing) {
     existing.updatedAt = now();
-    console.log("ZP addSelectionBookmark dedup hit", { existingId: existing.id });
     await setState(state);
     return;
   }

@@ -48,7 +48,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   const id = String(info.menuItemId);
-  console.log("ZP clicked", { raw: info.menuItemId, id, tabUrl: tab?.url, pageUrl: info.pageUrl });
 
   try {
     let url = tab?.url ?? info.pageUrl ?? "";
@@ -57,28 +56,23 @@ async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.t
     if (!url && tab?.id != null) {
       const fullTab = await tabsGet(tab.id);
       url = fullTab.url ?? "";
-      console.log("ZP fetched tab.url from tabs.get", url);
     }
 
     if (!url) {
-      console.warn("ZP no url available");
+      console.warn("ZP: no url available");
       return;
     }
 
     const title = tab?.title ?? url;
 
     if (id === "save-page") {
-      console.log("ZP calling addPageBookmark", { url, title });
       await addPageBookmark(url, title);
-      console.log("ZP addPageBookmark done");
     } else if (id === "save-selection") {
       const selectedText = info.selectionText?.trim() ?? "";
       if (!selectedText) {
-        console.warn("ZP no selection text");
+        console.warn("ZP: no selection text");
         return;
       }
-
-      console.log("ZP calling addSelectionBookmark", { url, title, selectedText });
 
       // Try to capture full anchor from content script
       let anchor: any = undefined;
@@ -86,9 +80,8 @@ async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.t
         try {
           const response = await sendMessage<{ anchor?: any; success?: boolean }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
           anchor = response?.anchor;
-          console.log("ZP captured anchor", { has: Boolean(anchor), fields: anchor ? Object.keys(anchor) : [] });
         } catch (err) {
-          console.warn("ZP anchor capture failed, will use fallback", err);
+          console.warn("ZP: anchor capture failed, will use fallback", err);
         }
       }
 
@@ -99,10 +92,9 @@ async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.t
         selectedText,
         anchor: anchor ?? undefined,
       });
-      console.log("ZP addSelectionBookmark done");
     }
   } catch (err) {
-    console.error("ZP handleClick failed", err);
+    console.error("ZP: handleClick failed", err);
   }
 }
 
@@ -121,7 +113,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
       url = fullTab.url ?? "";
     }
     if (!url) {
-      console.warn("ZP pin-it: no url available");
+      console.warn("ZP: no url available");
       return;
     }
 
@@ -137,7 +129,6 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
     }
 
     if (payload?.hasSelection && payload.selectedText) {
-      console.log("ZP pin-it: saving selection", { url, title, selectedText: payload.selectedText });
       await addSelectionBookmark({
         url,
         title,
@@ -145,7 +136,6 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
         anchor: payload.anchor ?? undefined,
       });
     } else {
-      console.log("ZP pin-it: saving page", { url, title });
       await addPageBookmark(url, title);
     }
 
@@ -158,7 +148,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
       }, 1500);
     }
   } catch (err) {
-    console.error("ZP pin-it failed", err);
+    console.error("ZP: pin-it failed", err);
   }
 }
 
@@ -170,7 +160,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (bookmarkId && confidence != null) {
       recordAnchorResolution(bookmarkId, confidence, repair)
         .then(() => {
-          console.log("ZP: Anchor resolution recorded for bookmark", bookmarkId, "confidence:", confidence);
           sendResponse({ success: true });
         })
         .catch((err: unknown) => {

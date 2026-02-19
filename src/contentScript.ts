@@ -258,13 +258,11 @@ function captureAnchor(): SnippetAnchor | null {
     const chatContext = detectChatContext(range) ?? undefined;
 
     if (chatContext) {
-      console.log("ZP: Detected chat context", { platform: chatContext.platform, messageIndex: chatContext.messageIndex });
     }
 
     // Container hint: find a stable ancestor container
     const containerHint = captureContainerHint(range) ?? undefined;
     if (containerHint) {
-      console.log("ZP: Captured container hint", { cssPath: containerHint.cssPath });
     }
 
     return {
@@ -432,7 +430,6 @@ function findByChatContext(
   if (chatContext.turnHash) {
     const hash = simpleTurnHash(messageEl.textContent ?? "");
     if (hash !== chatContext.turnHash) {
-      console.log("ZP: Chat turnHash mismatch, message may have changed");
       // Still try — the text itself might match
     }
   }
@@ -597,7 +594,6 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
 
   // 1. Container-scoped search (if containerHint exists)
   if (anchor.containerHint?.cssPath) {
-    console.log("ZP: Trying container-scoped search", { cssPath: anchor.containerHint.cssPath });
     const container = document.querySelector(anchor.containerHint.cssPath);
     if (container) {
       // Verify container via text sample similarity
@@ -608,13 +604,11 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
         );
         const sim = normalizedSimilarity(currentSample, anchor.containerHint.containerTextSample);
         containerVerified = sim >= 0.6;
-        console.log("ZP: Container text sample similarity:", sim.toFixed(2), containerVerified ? "(verified)" : "(failed)");
       }
 
       if (containerVerified) {
         const result = runStages(anchor, container, 0.05);
         if (result) {
-          console.log("✓ ZP: Found via container-scoped stage", result.stage, "confidence:", result.confidence.toFixed(2));
           result.container = container as Element;
           return result;
         }
@@ -624,7 +618,6 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
 
   // 2. Chat context container search (if chatContext exists and container search didn't succeed)
   if (anchor.chatContext) {
-    console.log("ZP: Trying chat context container search", { platform: anchor.chatContext.platform });
     let messageEl: Element | null = null;
 
     if (anchor.chatContext.platform === "chatgpt" && anchor.chatContext.messageId) {
@@ -646,7 +639,6 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
     if (messageEl) {
       const result = runStages(anchor, messageEl, 0.05);
       if (result) {
-        console.log("✓ ZP: Found via chat-scoped stage", result.stage, "confidence:", result.confidence.toFixed(2));
         result.container = messageEl;
         return result;
       }
@@ -654,25 +646,20 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
   }
 
   // 3. Global scan (stages A-F on document.body)
-  console.log("ZP: Running global scan for:", anchor.text.substring(0, 50));
   const globalResult = runStages(anchor, document.body, 0);
   if (globalResult) {
-    console.log("✓ ZP: Found via global stage", globalResult.stage, "confidence:", globalResult.confidence.toFixed(2));
     return globalResult;
   }
 
   // 4. Stage G: Shadow DOM fallback
-  console.log("ZP: Stage G - Trying shadow DOM fallback");
   const shadowExact = findByExactMatchShadow(anchor.text);
   if (shadowExact) {
-    console.log("✓ ZP: Found via shadow DOM exact match");
     return { found: true, confidence: 0.90, stage: "G-exact", range: shadowExact };
   }
 
   const shadowFuzzy = findBestFuzzyMatchShadow(anchor.text);
   if (shadowFuzzy && shadowFuzzy.similarity > FUZZY_SIMILARITY_MIN) {
     const conf = shadowFuzzy.similarity * 0.7;
-    console.log("✓ ZP: Found via shadow DOM fuzzy match, confidence:", conf.toFixed(2));
     return { found: true, confidence: conf, stage: "G-fuzzy", range: shadowFuzzy.range };
   }
 
@@ -737,7 +724,6 @@ function highlightAndScroll(result: HighlightResult): void {
   }
 
   if (result.confidence < CONFIDENCE_HIGH) {
-    console.log("ZP: Closest match (confidence " + result.confidence.toFixed(2) + ")");
   }
 
   try {
@@ -769,11 +755,9 @@ function highlightAndScroll(result: HighlightResult): void {
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   try {
-    console.log("ZP: Received message", { type: request.type });
 
     if (request.type === "ZP_CAPTURE_ANCHOR") {
       const anchor = captureAnchor();
-      console.log("ZP: Captured anchor", { hasText: !!anchor?.text, textLength: anchor?.text?.length });
       sendResponse({ anchor, success: true });
     } else if (request.type === "ZP_GET_SELECTION_PAYLOAD") {
       const sel = window.getSelection();
@@ -785,9 +769,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         sendResponse({ hasSelection: false });
       }
     } else if (request.type === "ZP_HIGHLIGHT_SNIPPET") {
-      console.log("ZP: Attempting to highlight snippet");
       const result = highlightSnippet(request.anchor);
-      console.log("ZP: Highlight result", { found: result.found, confidence: result.confidence, stage: result.stage });
       if (result.found) highlightAndScroll(result);
       sendResponse({ success: result.found, confidence: result.confidence, stage: result.stage, reason: result.reason });
     } else {
@@ -889,7 +871,6 @@ function sendResolution(result: HighlightResult, _anchor: SnippetAnchor, bookmar
       };
     }
 
-    console.log("ZP: Sending anchor resolution for bookmark", bookmarkId, "confidence:", result.confidence, "stage:", result.stage);
     chrome.runtime.sendMessage(payload);
   } catch (err) {
     console.warn("ZP: sendResolution failed", err);
@@ -922,7 +903,6 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
 
   // Use DOM stabilization gate for chat pages, simple delay for others
   if (isChatPage(anchor)) {
-    console.log("ZP: Chat page detected, waiting for DOM to stabilize");
     waitForDomStable(getChatRootSelector(anchor)).then(doHighlight);
   } else {
     setTimeout(doHighlight, INITIAL_DELAY_MS);
@@ -930,7 +910,6 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
 }
 
 function startMutationRetry(anchor: SnippetAnchor, bookmarkId?: string): void {
-  console.log("ZP: Text not found immediately, starting MutationObserver retry");
   let done = false;
   let debounceHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -953,7 +932,6 @@ function startMutationRetry(anchor: SnippetAnchor, bookmarkId?: string): void {
       if (done) return;
       const retry = highlightSnippet(anchor);
       if (retry.found) {
-        console.log("ZP: Found snippet after DOM mutation, confidence:", retry.confidence.toFixed(2));
         highlightAndScroll(retry);
         sendResolution(retry, anchor, bookmarkId);
         finish(true);
@@ -977,7 +955,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       timestamp?: number;
     } | undefined;
     if (newValue && newValue.url === window.location.href && newValue.anchor) {
-      console.log("ZP: Detected highlight request via storage change", { url: newValue.url });
       processHighlightRequest(newValue.anchor, newValue.bookmarkId);
     }
   }
@@ -998,12 +975,9 @@ chrome.storage.local.get("ZP_HIGHLIGHT_REQUEST", (items) => {
   } | undefined;
   if (!pending || pending.url !== window.location.href || !pending.anchor) return;
   if (pending.timestamp && Date.now() - pending.timestamp > MAX_REQUEST_AGE_MS) {
-    console.log("ZP: Discarding stale highlight request", { age: Date.now() - pending.timestamp });
     chrome.storage.local.remove("ZP_HIGHLIGHT_REQUEST");
     return;
   }
-  console.log("ZP: Found pending highlight request on load", { url: pending.url });
   processHighlightRequest(pending.anchor, pending.bookmarkId);
 });
 
-console.log("ZP: Content script loaded and listening for messages");

@@ -1,24 +1,92 @@
 # ZeroPin
 
-A Chrome extension to save and organize web bookmarks locally, with support for snippet bookmarks that capture selected text and can highlight it when revisited.
+A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks locally. Capture full pages or text snippets, highlight saved passages when revisited, and detect AI chat context from platforms like ChatGPT and Claude.
 
 ## Features
 
-- Save full pages or text snippets from any webpage
-- Snippet bookmarks highlight the saved text when reopened
-- Organize bookmarks into folders with drag-and-drop
-- Search, rename, and add notes to bookmarks
-- Export/import your library as JSON
-- Dark mode
+**Saving**
+- Right-click "Save to ZeroPin" or press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac)
+- Save full pages or selected text as snippet bookmarks
+- Snippets are highlighted when the page is reopened
+- AI chat detection: captures platform, role (user/assistant), and conversation metadata from ChatGPT, Claude, Gemini, Copilot, Poe, and Perplexity
 
-## Development
+**Library**
+- Folder hierarchy with collapsible tree and drag-and-drop reordering
+- Search across name, URL, domain, snippet text, and notes
+- Source filter: All / Web / AI Answers / AI Prompts (with domain-based fallback)
+- Page grouping by URL with collapsible groups
+- Inline rename, notes, bulk select, bulk move/delete
+- Export/import library as JSON
+
+**Popup**
+- Compact toolbar popup with search, recent pins, and current folder shortcut
+- Quick access to full Library
+
+**Theme**
+- Auto-detects system dark/light mode
+- Manual override cycling: System > Dark > Light
+- Persisted preference with migration from legacy format
+
+## Tech Stack
+
+- **Runtime**: Chrome Extension Manifest V3
+- **Framework**: React 19 + TypeScript (strict mode)
+- **Styling**: Tailwind CSS v4, shadcn/ui (New York), Radix UI primitives
+- **Icons**: lucide-react + custom BrandIcon SVG
+- **DnD**: @atlaskit/pragmatic-drag-and-drop
+- **Build**: Vite 7 (multi-entry: popup, library, walkthrough, background, contentScript)
+- **Testing**: Vitest + jsdom (136 tests)
+- **Storage**: chrome.storage.local with schema migrations (v0-v4)
+
+## Getting Started
 
 ```bash
 npm install
 npm run build
 ```
 
-Load `dist/` as an unpacked extension in Chrome.
+1. Open `chrome://extensions` in Chrome
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select the `dist/` folder
+
+## Development
+
+```bash
+npm run dev       # Vite dev server (for UI development)
+npm run build     # TypeScript check + production build
+npm run lint      # ESLint
+npm test          # Run all tests
+```
+
+## Project Structure
+
+```
+src/
+  main.tsx              # Popup entry point
+  library.tsx           # Library page entry point
+  walkthrough.tsx       # Walkthrough page entry point
+  background.ts         # Service worker (context menus, commands)
+  contentScript.ts      # Content script (selection, AI detection, highlighting)
+  app/
+    BrandIcon.tsx       # ZeroPin brand icon SVG component
+    Toast.tsx           # Toast notification provider
+    theme.ts            # Dark mode hook + ThemeContext
+    pages/
+      Library.tsx       # Full library manager
+      Walkthrough.tsx   # Interactive onboarding demo
+  core/
+    types.ts            # Bookmark, Folder, LibraryState types
+    anchor.ts           # Text-quote anchoring for snippet highlights
+    storage/
+      local.ts          # CRUD operations on chrome.storage.local
+      migrate.ts        # Schema migration framework
+  components/ui/        # shadcn/ui components
+public/
+  manifest.json         # Chrome extension manifest
+  icons/                # Extension icons (SVG source + PNGs)
+scripts/
+  generate-icons.mjs    # PNG generation from SVG source
+```
 
 ## Icon Generation
 
@@ -26,4 +94,4 @@ Load `dist/` as an unpacked extension in Chrome.
 node scripts/generate-icons.mjs
 ```
 
-Reads `scripts/icon.svg` and outputs PNGs at 16, 32, 48, 128 sizes to `public/icons/`.
+Renders `scripts/icon.svg` to PNG at 16, 32, 48, and 128px into `public/icons/`.

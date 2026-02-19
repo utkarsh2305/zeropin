@@ -598,7 +598,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
           },
           () => {
             const err = chrome.runtime.lastError;
-            if (err) console.warn(`ZR: Failed to write highlight request: ${err.message}`);
+            if (err) console.warn(`ZP: Failed to write highlight request: ${err.message}`);
           }
         );
       });
@@ -1096,7 +1096,7 @@ export default function Library() {
           },
           () => {
             const err = chrome.runtime.lastError;
-            if (err) console.warn(`ZR: Failed to write highlight request: ${err.message}`);
+            if (err) console.warn(`ZP: Failed to write highlight request: ${err.message}`);
           }
         );
       });

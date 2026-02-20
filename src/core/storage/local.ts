@@ -1,4 +1,4 @@
-import type { LibraryState } from "../types";
+import type { LibraryState, BookmarkMedia } from "../types";
 import { SCHEMA_VERSION } from "../types";
 import { migrateState } from "./migrate";
 
@@ -129,9 +129,9 @@ export function computeSnippetHash(url: string, snippetText?: string): string {
   return djb2(normUrl + "||" + normText);
 }
 
-export async function addPageBookmark(url: string, title: string): Promise<void> {
+export async function addPageBookmark(url: string, title: string, media?: BookmarkMedia, inputFolderId?: string): Promise<void> {
   const state = await getState();
-  const folderId = state.inboxFolderId ?? state.rootFolderId;
+  const folderId = inputFolderId ?? state.inboxFolderId ?? state.rootFolderId;
   const hash = computeSnippetHash(url);
 
   // Dedup: check for existing bookmark with same hash in same folder
@@ -165,6 +165,7 @@ export async function addPageBookmark(url: string, title: string): Promise<void>
     createdAt: ts,
     updatedAt: ts,
     snippetHash: hash,
+    ...(media !== undefined ? { media } : {}),
   };
 
   await setState(state);
@@ -260,7 +261,7 @@ export async function addSelectionBookmark(input: {
   await setState(state);
 }
 
-export async function createFolder(input: { parentId: string; name: string }): Promise<string> {
+export async function createFolder(input: { parentId: string; name: string; color?: string }): Promise<string> {
   const state = await getState();
   const id = crypto.randomUUID();
   const ts = now();
@@ -272,6 +273,7 @@ export async function createFolder(input: { parentId: string; name: string }): P
     sortKey: String(ts),
     createdAt: ts,
     updatedAt: ts,
+    color: input.color,
   };
 
   await setState(state);
@@ -284,6 +286,17 @@ export async function renameFolder(folderId: string, name: string): Promise<void
   if (!folder) throw new Error(`Folder ${folderId} not found`);
 
   folder.name = name;
+  folder.updatedAt = now();
+
+  await setState(state);
+}
+
+export async function setFolderColor(folderId: string, color: string | undefined): Promise<void> {
+  const state = await getState();
+  const folder = state.folders[folderId];
+  if (!folder) throw new Error(`Folder ${folderId} not found`);
+
+  folder.color = color;
   folder.updatedAt = now();
 
   await setState(state);
@@ -302,6 +315,37 @@ export async function deleteFolderIfEmpty(folderId: string): Promise<void> {
   if (hasBookmarks) throw new Error(`Folder has bookmarks`);
 
   delete state.folders[folderId];
+  await setState(state);
+}
+
+export async function deleteFolderCascade(folderId: string): Promise<void> {
+  const state = await getState();
+  if (!state.folders[folderId]) throw new Error(`Folder ${folderId} not found`);
+  if (folderId === state.rootFolderId) throw new Error("Cannot delete root folder");
+  if (folderId === state.inboxFolderId) throw new Error("Cannot delete Inbox folder");
+
+  // Collect target + all descendant folder IDs
+  const toDelete = new Set<string>();
+  const collect = (id: string) => {
+    toDelete.add(id);
+    for (const f of Object.values(state.folders)) {
+      if (f.parentId === id) collect(f.id);
+    }
+  };
+  collect(folderId);
+
+  // Delete bookmarks in those folders
+  for (const b of Object.values(state.bookmarks)) {
+    if (toDelete.has(b.folderId)) delete state.bookmarks[b.id];
+  }
+  // Delete folders
+  for (const id of toDelete) delete state.folders[id];
+
+  // Reset lastUsedFolderId if it was deleted
+  if (state.lastUsedFolderId && toDelete.has(state.lastUsedFolderId)) {
+    state.lastUsedFolderId = state.inboxFolderId;
+  }
+
   await setState(state);
 }
 

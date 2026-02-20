@@ -8,6 +8,7 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Right-click "Save to ZeroPin" or press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac)
 - Save full pages or selected text as snippet bookmarks
 - Snippets are highlighted when the page is reopened
+- YouTube Moment Pins: saving a YouTube watch page captures the current playback timestamp; the pin reopens the video at exactly that moment and displays a `▶ HH:MM` badge in the library
 - AI chat detection: captures platform, role (user/assistant), and conversation metadata from ChatGPT, Claude, Gemini, Copilot, Poe, Perplexity, Grok, DeepSeek, and Mistral
 - AI chat pins show a floating snippet card with auto-copy to clipboard (Ctrl+F / ⌘F to find, Ctrl+V / ⌘V to paste)
 - Snippet card follows your selected theme (dark/light/system)
@@ -38,7 +39,7 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - **DnD**: @atlaskit/pragmatic-drag-and-drop
 - **Build**: Vite 7 (multi-entry: popup, library, walkthrough, background, contentScript)
 - **Testing**: Vitest + jsdom (136 tests)
-- **Storage**: chrome.storage.local with schema migrations (v0-v4)
+- **Storage**: chrome.storage.local with schema migrations (v0-v5)
 
 ## Getting Started
 
@@ -79,6 +80,7 @@ src/
   core/
     types.ts            # Bookmark, Folder, LibraryState types
     anchor.ts           # Text-quote anchoring for snippet highlights
+    youtube.ts          # YouTube URL utilities and capture types
     storage/
       local.ts          # CRUD operations on chrome.storage.local
       migrate.ts        # Schema migration framework

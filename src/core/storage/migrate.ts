@@ -42,6 +42,16 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 4;
     return state;
   },
+  // v4 → v5: add color field to folders (undefined = default theme color)
+  4: (state) => {
+    if (state.folders) {
+      for (const f of Object.values(state.folders) as any[]) {
+        if (f.color === undefined) f.color = undefined;
+      }
+    }
+    state.schemaVersion = 5;
+    return state;
+  },
 };
 
 /**

@@ -23,6 +23,14 @@ import {
   computeOffsetsInContainer,
   walkTextNodesShadow,
 } from "./core/anchor";
+import {
+  getYouTubeVideoId,
+  normalizeYouTubeCanonicalUrl,
+  parseYouTubeTimeToSec,
+  formatSecToLabel,
+  buildYouTubeOpenUrl,
+} from "./core/youtube";
+import type { YouTubeCaptureResult } from "./core/youtube";
 
 interface SnippetAnchor {
   text: string;
@@ -901,12 +909,25 @@ async function showSnippetCard(anchor: SnippetAnchor): Promise<void> {
   // Fade in
   requestAnimationFrame(() => { card.style.opacity = "1"; });
 
-  // Auto-copy first ~120 chars for Find use (one-time permission per domain)
+  // Auto-copy first ~120 chars for Find use
   const copyText = anchor.text.slice(0, 120);
-  navigator.clipboard.writeText(copyText).then(() => {
+  const onCopied = () => {
     tip.textContent = `Copied to clipboard \u2014 use ${findKey} to find and ${pasteKey} to paste`;
-  }).catch(() => {
-    // Permission denied or not yet granted — keep fallback tip
+  };
+  navigator.clipboard.writeText(copyText).then(onCopied).catch(() => {
+    // Fallback: execCommand (works with clipboardWrite manifest permission)
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = copyText;
+      ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0;";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      if (document.execCommand("copy")) onCopied();
+      document.body.removeChild(ta);
+    } catch {
+      // Both methods failed — keep fallback tip visible
+    }
   });
 
   // Auto-dismiss
@@ -972,9 +993,129 @@ function highlightAndScroll(result: HighlightResult): void {
   }
 }
 
+// ── YouTube moment capture ───────────────────────────────────────────────────
+
+/** Retry delays in ms. Allows YouTube's SPA to finish mounting the <video>. */
+const YT_RETRY_DELAYS_MS = [0, 150, 300, 500, 700];
+
+/**
+ * Reads the current playback position from the in-page YouTube player.
+ * Fast path: if the URL already has a t= param, use it directly.
+ * Otherwise reads video.currentTime with up to 5 attempts.
+ * Always resolves (never rejects) — falls back gracefully.
+ */
+async function captureYouTubeMoment(): Promise<YouTubeCaptureResult> {
+  const url = window.location.href;
+  const videoId = getYouTubeVideoId(url);
+  if (!videoId) {
+    return { kind: "fallback", canonicalUrl: url, openUrl: url };
+  }
+
+  const canonicalUrl = normalizeYouTubeCanonicalUrl(url)!;
+
+  // Fast path: t= or start= already present in URL
+  const urlObj = new URL(url);
+  const tParam = urlObj.searchParams.get("t") ?? urlObj.searchParams.get("start");
+  if (tParam) {
+    const sec = parseYouTubeTimeToSec(tParam);
+    if (sec != null && sec >= 2) {
+      return {
+        kind: "youtube",
+        videoId,
+        timestampSec: sec,
+        timestampLabel: formatSecToLabel(sec),
+        canonicalUrl,
+        openUrl: buildYouTubeOpenUrl(canonicalUrl, sec),
+        captureMethod: "urlParam",
+      };
+    }
+  }
+
+  // Read video element with retries (player may not be mounted yet)
+  for (const delay of YT_RETRY_DELAYS_MS) {
+    if (delay > 0) await new Promise<void>((res) => setTimeout(res, delay));
+
+    const v = document.querySelector<HTMLVideoElement>("video");
+    if (!v) continue; // not mounted yet — retry
+
+    // Live streams have no meaningful timestamp
+    if (v.duration === Infinity) break;
+    if (v.seekable && v.seekable.length === 0) break;
+
+    if (v.readyState < 2) continue; // not enough data yet — retry
+
+    const t = Math.floor(v.currentTime ?? 0);
+    if (t >= 2) {
+      return {
+        kind: "youtube",
+        videoId,
+        timestampSec: t,
+        timestampLabel: formatSecToLabel(t),
+        canonicalUrl,
+        openUrl: buildYouTubeOpenUrl(canonicalUrl, t),
+        captureMethod: "video.currentTime",
+      };
+    }
+    // Video ready but not started (t < 2) — no useful timestamp, don't retry
+    break;
+  }
+
+  return { kind: "fallback", videoId, canonicalUrl, openUrl: canonicalUrl };
+}
+
+// ── In-page save confirmation toast ─────────────────────────────────────────
+
+/**
+ * Shows a brief floating toast inside the page.
+ * Auto-dismisses after ~2.5 s with a fade transition.
+ */
+function showSaveConfirmToast(message: string): void {
+  const existing = document.getElementById("zp-save-toast");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.id = "zp-save-toast";
+  toast.textContent = message;
+  Object.assign(toast.style, {
+    position: "fixed",
+    top: "72px",
+    right: "20px",
+    zIndex: "2147483647",
+    background: "rgba(15,15,15,0.92)",
+    color: "#fff",
+    padding: "10px 18px",
+    borderRadius: "8px",
+    fontSize: "14px",
+    fontFamily: "system-ui, sans-serif",
+    letterSpacing: "0.01em",
+    boxShadow: "0 4px 18px rgba(0,0,0,0.35)",
+    pointerEvents: "none",
+    opacity: "0",
+    transition: "opacity 0.18s ease",
+  });
+  document.body.appendChild(toast);
+
+  requestAnimationFrame(() => requestAnimationFrame(() => { toast.style.opacity = "1"; }));
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    setTimeout(() => toast.remove(), 250);
+  }, 2500);
+}
+
 // ── Message listener ──
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  // Async handler — keep channel open with return true
+  if (request.type === "ZP_CAPTURE_YT_MOMENT") {
+    captureYouTubeMoment()
+      .then(sendResponse)
+      .catch(() => {
+        const url = window.location.href;
+        sendResponse({ kind: "fallback", canonicalUrl: url, openUrl: url });
+      });
+    return true;
+  }
+
   try {
 
     if (request.type === "ZP_CAPTURE_ANCHOR") {
@@ -993,6 +1134,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       const result = highlightSnippet(request.anchor);
       if (result.found) highlightAndScroll(result);
       sendResponse({ success: result.found, confidence: result.confidence, stage: result.stage, reason: result.reason });
+    } else if (request.type === "ZP_SHOW_SAVE_CONFIRM") {
+      showSaveConfirmToast(request.message as string);
+      sendResponse({ success: true });
     } else {
       sendResponse({ success: false, reason: "Unknown message type" });
     }

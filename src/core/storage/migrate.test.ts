@@ -57,10 +57,18 @@ describe("migrateState", () => {
     expect(result.bookmarks["b1"].lastResolvedConfidence).toBeUndefined();
   });
 
-  it("v4 state → returned unchanged", () => {
+  it("v4 state → migrated to v5 (folders get color field)", () => {
     const raw = { ...baseState, schemaVersion: 4 };
     const result = migrateState(raw);
-    expect(result.schemaVersion).toBe(4);
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(result.bookmarks["b1"].name).toBe("Example");
+    expect("color" in result.folders["root"]).toBe(true);
+  });
+
+  it("v5 state → returned unchanged", () => {
+    const raw = { ...baseState, schemaVersion: 5 };
+    const result = migrateState(raw);
+    expect(result.schemaVersion).toBe(5);
     expect(result.bookmarks["b1"].name).toBe("Example");
   });
 

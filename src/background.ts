@@ -1,5 +1,10 @@
 /// <reference types="chrome" />
-import { addPageBookmark, addSelectionBookmark, recordAnchorResolution } from "./core/storage/local";
+import { addPageBookmark, addSelectionBookmark, recordAnchorResolution, getState } from "./core/storage/local";
+import { isYouTubeWatchUrl, normalizeYouTubeCanonicalUrl } from "./core/youtube";
+import type { YouTubeCaptureResult } from "./core/youtube";
+import type { BookmarkMedia } from "./core/types";
+import { getRecentFolderIds, updateRecents, setPendingSave, RECENTS_KEY, computeFolderLabel } from "./core/storage/recents";
+import type { PendingSave } from "./core/storage/recents";
 
 function tabsGet(tabId: number): Promise<chrome.tabs.Tab> {
   return new Promise((resolve, reject) => {
@@ -28,19 +33,51 @@ function sendMessage<T>(
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: "save-page",
-    title: "Save to ZeroPin",
-    contexts: ["page"]
-  });
+// ── Context menu rebuild ──────────────────────────────────────────────────────
+
+async function rebuildContextMenus(): Promise<void> {
+  await new Promise<void>((r) => chrome.contextMenus.removeAll(r));
 
   chrome.contextMenus.create({
-    id: "save-selection",
-    title: "Save selection to ZeroPin",
-    contexts: ["selection"]
+    id: "zp_save_root",
+    title: "Save to ZeroPin",
+    contexts: ["page", "selection"],
   });
+
+  const [rawRecents, state] = await Promise.all([getRecentFolderIds(), getState()]);
+
+  // Filter out deleted folders and persist cleaned list
+  const validRecents = rawRecents.filter((id) => !!state.folders[id]);
+  if (validRecents.length !== rawRecents.length) {
+    await chrome.storage.local.set({ [RECENTS_KEY]: validRecents });
+  }
+
+  for (const folderId of validRecents) {
+    chrome.contextMenus.create({
+      id: `zp_save_recent_${folderId}`,
+      parentId: "zp_save_root",
+      title: computeFolderLabel(folderId, state.folders),
+      contexts: ["page", "selection"],
+    });
+  }
+
+  chrome.contextMenus.create({
+    id: "zp_save_more",
+    parentId: "zp_save_root",
+    title: "More\u2026",
+    contexts: ["page", "selection"],
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  void rebuildContextMenus();
 });
+
+chrome.runtime.onStartup.addListener(() => {
+  void rebuildContextMenus();
+});
+
+// ── Click handler ─────────────────────────────────────────────────────────────
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   void handleClick(info, tab);
@@ -48,11 +85,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.tabs.Tab) {
   const id = String(info.menuItemId);
+  if (id === "zp_save_root") return; // click on parent — ignore
 
   try {
     let url = tab?.url ?? info.pageUrl ?? "";
 
-    // If tab.url is missing, fetch it explicitly (promisified)
     if (!url && tab?.id != null) {
       const fullTab = await tabsGet(tab.id);
       url = fullTab.url ?? "";
@@ -65,40 +102,137 @@ async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.t
 
     const title = tab?.title ?? url;
 
-    if (id === "save-page") {
-      await addPageBookmark(url, title);
-    } else if (id === "save-selection") {
-      const selectedText = info.selectionText?.trim() ?? "";
-      if (!selectedText) {
-        console.warn("ZP: no selection text");
-        return;
+    if (id === "zp_save_more") {
+      let anchor: any;
+      if (info.selectionText && tab?.id != null) {
+        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
+        anchor = r?.anchor;
       }
-
-      // Try to capture full anchor from content script
-      let anchor: any = undefined;
-      if (tab?.id != null) {
-        try {
-          const response = await sendMessage<{ anchor?: any; success?: boolean }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
-          anchor = response?.anchor;
-        } catch (err) {
-          console.warn("ZP: anchor capture failed, will use fallback", err);
-        }
+      let ytResult: any;
+      if (tab?.id != null && isYouTubeWatchUrl(url)) {
+        ytResult = await sendMessage(tab.id, { type: "ZP_CAPTURE_YT_MOMENT" });
       }
-
-      // Call with anchor if available, otherwise just selectedText
-      await addSelectionBookmark({
+      const pending: PendingSave = {
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        tabId: tab?.id ?? 0,
         url,
         title,
-        selectedText,
-        anchor: anchor ?? undefined,
-      });
+        selectionText: info.selectionText?.trim(),
+        anchor,
+        ytResult,
+      };
+      await setPendingSave(pending);
+      chrome.tabs.create({ url: chrome.runtime.getURL("library.html?mode=picker") });
+      return;
+    }
+
+    if (id.startsWith("zp_save_recent_")) {
+      const folderId = id.slice("zp_save_recent_".length);
+      await saveWithFolder(info, tab, url, title, folderId);
+      return;
     }
   } catch (err) {
     console.error("ZP: handleClick failed", err);
   }
 }
 
-// ── Keyboard shortcut "Pin It" ──
+// ── saveWithFolder ────────────────────────────────────────────────────────────
+
+async function saveWithFolder(
+  info: chrome.contextMenus.OnClickData,
+  tab: chrome.tabs.Tab | undefined,
+  url: string,
+  title: string,
+  folderId: string,
+): Promise<void> {
+  const selectionText = info.selectionText?.trim() ?? "";
+
+  if (selectionText) {
+    let anchor: any;
+    if (tab?.id != null) {
+      try {
+        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
+        anchor = r?.anchor;
+      } catch { /* fallback */ }
+    }
+    await addSelectionBookmark({ url, title, selectedText: selectionText, anchor, folderId });
+    await finishSave(tab?.id, folderId, "Saved snippet");
+  } else {
+    await savePagePossiblyWithYouTube(tab?.id, url, title, folderId);
+    // finishSave toast is sent inside savePagePossiblyWithYouTube when folderId is set
+  }
+
+  await updateRecents(folderId);
+  void rebuildContextMenus();
+}
+
+async function finishSave(tabId: number | undefined, folderId: string, defaultMessage: string | null): Promise<void> {
+  if (tabId == null) return;
+  const state = await getState();
+  const folderName = state.folders[folderId]?.name ?? "folder";
+  const message = defaultMessage ?? `Saved to ${folderName}`;
+  void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message });
+}
+
+// ── YouTube-aware page save ───────────────────────────────────────────────────
+
+async function savePagePossiblyWithYouTube(
+  tabId: number | undefined,
+  url: string,
+  title: string,
+  folderId?: string,
+): Promise<void> {
+  if (!isYouTubeWatchUrl(url)) {
+    await addPageBookmark(url, title, undefined, folderId);
+    if (tabId != null && folderId) {
+      const state = await getState();
+      const folderName = state.folders[folderId]?.name ?? "folder";
+      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: `Saved to ${folderName}` });
+    } else if (tabId != null) {
+      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: "Saved page" });
+    }
+    return;
+  }
+
+  const canonicalUrl = normalizeYouTubeCanonicalUrl(url) ?? url;
+  let saveUrl = canonicalUrl;
+  let media: BookmarkMedia | undefined;
+  let toastMessage = folderId ? undefined : "Saved page"; // will be set below
+
+  if (tabId != null) {
+    const result = await sendMessage<YouTubeCaptureResult>(tabId, { type: "ZP_CAPTURE_YT_MOMENT" });
+
+    if (result?.kind === "youtube") {
+      media = {
+        kind: "youtube",
+        videoId: result.videoId,
+        timestampSec: result.timestampSec,
+        timestampLabel: result.timestampLabel,
+        canonicalUrl: result.canonicalUrl,
+        openUrl: result.openUrl,
+        captureMethod: result.captureMethod,
+      };
+      saveUrl = result.openUrl;
+      toastMessage = `Saved YouTube moment at ${result.timestampLabel}`;
+    } else if (result?.kind === "fallback") {
+      saveUrl = result.canonicalUrl;
+    }
+
+    if (toastMessage === undefined) {
+      // folderId set, non-YouTube path
+      const state = await getState();
+      const folderName = state.folders[folderId!]?.name ?? "folder";
+      toastMessage = `Saved to ${folderName}`;
+    }
+
+    void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: toastMessage });
+  }
+
+  await addPageBookmark(saveUrl, title, media, folderId);
+}
+
+// ── Keyboard shortcut "Pin It" ────────────────────────────────────────────────
 
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command !== "pin-it") return;
@@ -136,7 +270,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
         anchor: payload.anchor ?? undefined,
       });
     } else {
-      await addPageBookmark(url, title);
+      await savePagePossiblyWithYouTube(tab?.id, url, title);
     }
 
     // Badge flash
@@ -152,7 +286,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
   }
 }
 
-// ── Anchor repair listener ──
+// ── Message listener ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.type === "ZP_ANCHOR_RESOLVED") {
@@ -169,5 +303,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       return true; // keep channel open for async response
     }
     sendResponse({ success: false, reason: "Missing bookmarkId or confidence" });
+  }
+
+  if (request.type === "ZP_FOLDERS_CHANGED") {
+    void rebuildContextMenus();
+    sendResponse({ ok: true });
+    return false;
   }
 });

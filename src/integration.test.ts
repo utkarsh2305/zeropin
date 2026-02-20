@@ -41,6 +41,15 @@ import {
   bulkMoveBookmarks,
   createFolder,
 } from "./core/storage/local";
+import {
+  updateRecents,
+  getRecentFolderIds,
+  getPendingSave,
+  setPendingSave,
+  computeFolderLabel,
+  RECENTS_MAX,
+} from "./core/storage/recents";
+import type { PendingSave } from "./core/storage/recents";
 
 // ── Helpers ──
 
@@ -286,5 +295,164 @@ describe("Full flow", () => {
     const recent = getRecentPins(allBookmarks(s2));
     expect(recent.length).toBe(2);
     expect(recent[0].createdAt).toBeGreaterThanOrEqual(recent[1].createdAt);
+  });
+});
+
+// ── Context menu recents ──
+
+describe("Context menu recents — save → updateRecents → rebuild menu", () => {
+  beforeEach(() => {
+    setStoreState(makeState());
+    store["zp_recents"] = [];
+  });
+
+  it("saving via recent item updates recents list", async () => {
+    await addPageBookmark("https://example.com", "Example");
+    await updateRecents("inbox");
+    const ids = await getRecentFolderIds();
+    expect(ids[0]).toBe("inbox");
+  });
+
+  it("recents list caps at RECENTS_MAX (5) and drops oldest", async () => {
+    const state = makeState();
+    const folderIds: string[] = [];
+    for (let i = 0; i < RECENTS_MAX + 2; i++) {
+      const id = `f${i}`;
+      state.folders[id] = { id, parentId: "root", name: `Folder ${i}`, sortKey: String(i), createdAt: i, updatedAt: i };
+      folderIds.push(id);
+    }
+    setStoreState(state);
+
+    for (const id of folderIds) {
+      await updateRecents(id);
+    }
+    const ids = await getRecentFolderIds();
+    expect(ids).toHaveLength(RECENTS_MAX);
+    // Most recent should be last added
+    expect(ids[0]).toBe(folderIds[folderIds.length - 1]);
+    // Oldest (f0) should be gone
+    expect(ids).not.toContain(folderIds[0]);
+  });
+
+  it("saving to same folder keeps it at front", async () => {
+    await updateRecents("inbox");
+    const folderId = await createFolder({ parentId: "root", name: "Work" });
+    await updateRecents(folderId);
+    await updateRecents("inbox");
+    const ids = await getRecentFolderIds();
+    expect(ids[0]).toBe("inbox");
+    expect(ids.filter((id) => id === "inbox")).toHaveLength(1); // no duplicates
+  });
+
+  it("computeFolderLabel uses parent name for subfolders", async () => {
+    const state = makeState();
+    state.folders["proj"] = { id: "proj", parentId: "inbox", name: "ProjectX", sortKey: "p", createdAt: 1, updatedAt: 1 };
+    setStoreState(state);
+    const label = computeFolderLabel("proj", state.folders);
+    expect(label).toBe("Inbox \u203a ProjectX");
+  });
+
+  it("recents filter removes deleted folder ids", async () => {
+    const state = makeState();
+    state.folders["temp"] = { id: "temp", parentId: "root", name: "Temp", sortKey: "t", createdAt: 1, updatedAt: 1 };
+    setStoreState(state);
+    // Set recents WITHOUT replacing store (setStoreState would overwrite zp_recents)
+    store["zp_recents"] = ["inbox", "temp"];
+
+    // Simulate deleting "temp" folder by patching the stored state directly
+    const state2 = await getState();
+    delete state2.folders["temp"];
+    // Patch state in store without clearing other keys
+    store["zp_state"] = state2;
+
+    // Filter logic (same as rebuildContextMenus)
+    const rawRecents = await getRecentFolderIds();
+    const state3 = await getState();
+    const validRecents = rawRecents.filter((id) => !!state3.folders[id]);
+    expect(validRecents).toEqual(["inbox"]);
+    expect(validRecents).not.toContain("temp");
+  });
+});
+
+// ── Picker mode save flow ──
+
+describe("Library picker mode — pendingSave → select folder → save", () => {
+  beforeEach(() => {
+    setStoreState(makeState());
+    store["zp_pending_save"] = null;
+  });
+
+  it("stores PendingSave and retrieves it", async () => {
+    const pending: PendingSave = {
+      id: "uuid-1",
+      createdAt: Date.now(),
+      tabId: 1,
+      url: "https://example.com",
+      title: "Example",
+    };
+    await setPendingSave(pending);
+    const result = await getPendingSave();
+    expect(result?.url).toBe("https://example.com");
+    expect(result?.id).toBe("uuid-1");
+  });
+
+  it("completes picker page save: addPageBookmark then clear pendingSave", async () => {
+    const pending: PendingSave = {
+      id: "uuid-2",
+      createdAt: Date.now(),
+      tabId: 1,
+      url: "https://picker.example.com",
+      title: "Picker Test",
+    };
+    await setPendingSave(pending);
+
+    // Simulate user clicking a folder in picker
+    const folderId = await createFolder({ parentId: "root", name: "Picked Folder" });
+    await addPageBookmark(pending.url, pending.title, undefined, folderId);
+    await updateRecents(folderId);
+    await setPendingSave(null);
+
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.folderId).toBe(folderId);
+    expect(bm.url).toBe("https://picker.example.com");
+
+    const afterPending = await getPendingSave();
+    expect(afterPending).toBeNull();
+
+    const recents = await getRecentFolderIds();
+    expect(recents[0]).toBe(folderId);
+  });
+
+  it("picker snippet save: stores anchor and selectedText", async () => {
+    const pending: PendingSave = {
+      id: "uuid-3",
+      createdAt: Date.now(),
+      tabId: 1,
+      url: "https://docs.example.com",
+      title: "Docs",
+      selectionText: "important snippet",
+      anchor: { text: "important snippet", prefix: "Read: ", suffix: " here." },
+    };
+    await setPendingSave(pending);
+
+    const folderId = await createFolder({ parentId: "root", name: "Research" });
+    await addSelectionBookmark({
+      url: pending.url,
+      title: pending.title,
+      selectedText: pending.selectionText!,
+      anchor: pending.anchor,
+      folderId,
+    });
+    await setPendingSave(null);
+
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.type).toBe("SNIPPET");
+    expect(bm.snippet?.text).toBe("important snippet");
+    expect(bm.folderId).toBe(folderId);
+
+    const afterPending = await getPendingSave();
+    expect(afterPending).toBeNull();
   });
 });

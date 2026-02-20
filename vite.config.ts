@@ -13,6 +13,22 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts", "src/**/*.tsx"],
+      exclude: [
+        "src/test-utils/**",
+        "**/*.test.ts",
+        "src/contentScript.ts",
+        "src/background.ts",
+        "vite.config.ts",
+      ],
+      thresholds: {
+        lines: 60,
+        functions: 60,
+        branches: 50,
+      },
+    },
   },
   build: {
     outDir: "dist",

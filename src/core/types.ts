@@ -1,4 +1,19 @@
-export const SCHEMA_VERSION = 4 as const;
+export const SCHEMA_VERSION = 5 as const;
+
+/** Optional media metadata attached to a bookmark. Currently only "youtube". */
+export interface BookmarkMedia {
+  kind: "youtube";
+  videoId: string;
+  /** Playback position in whole seconds; undefined when no timestamp was captured. */
+  timestampSec?: number;
+  /** Human-readable label e.g. "08:36"; set whenever timestampSec is set. */
+  timestampLabel?: string;
+  /** Canonical watch URL: https://www.youtube.com/watch?v=ID (no timestamp). */
+  canonicalUrl: string;
+  /** URL to open: canonicalUrl + &t=SECs if timestampSec set, else canonicalUrl. */
+  openUrl: string;
+  captureMethod: "video.currentTime" | "urlParam" | "fallback";
+}
 
 export type FolderId = string;
 export type BookmarkId = string;
@@ -12,6 +27,7 @@ export interface Folder {
   sortKey: string;
   createdAt: number;
   updatedAt: number;
+  color?: string;
 }
 
 export interface Bookmark {
@@ -29,6 +45,9 @@ export interface Bookmark {
   openCount?: number;
   lastOpenedAt?: number;
   lastResolvedConfidence?: number;
+
+  /** YouTube (or future) media metadata. Present only for YouTube moment pins. */
+  media?: BookmarkMedia;
 
   // SNIPPET-only (optional fields)
   snippet?: {

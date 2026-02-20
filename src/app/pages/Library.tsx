@@ -1,5 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderIfEmpty, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, recordBookmarkOpen } from "../../core/storage/local";
+import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark } from "../../core/storage/local";
+import { getPendingSave, setPendingSave, updateRecents } from "../../core/storage/recents";
+import type { PendingSave } from "../../core/storage/recents";
+import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
+import type { BrowserImportPreview } from "../../core/storage/importBrowser";
 import type { LibraryState, Bookmark, Folder } from "../../core/types";
 import { useTheme } from "../theme";
 import { useToast } from "../Toast";
@@ -17,7 +21,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -46,6 +50,23 @@ type DragItemData = Record<string | symbol, unknown> & {
   folderId?: string;
 };
 
+/* ─── Folder color palette ──────────────────────────────────────── */
+
+const FOLDER_COLORS: Record<string, { light: string; dark: string } | null> = {
+  default: null,
+  red:    { light: "#dc2626", dark: "#f87171" },
+  orange: { light: "#ea580c", dark: "#fb923c" },
+  yellow: { light: "#ca8a04", dark: "#facc15" },
+  green:  { light: "#16a34a", dark: "#4ade80" },
+  cyan:   { light: "#0891b2", dark: "#22d3ee" },
+  blue:   { light: "#2563eb", dark: "#60a5fa" },
+  purple: { light: "#9333ea", dark: "#c084fc" },
+  pink:   { light: "#db2777", dark: "#f472b6" },
+  grey:   { light: "#6b7280", dark: "#9ca3af" },
+  black:  { light: "#1f2937", dark: "#6b7280" },
+  white:  { light: "#9ca3af", dark: "#f9fafb" },
+};
+
 /* ─── DroppableFolder ───────────────────────────────────────────── */
 
 function DroppableFolder({
@@ -55,11 +76,13 @@ function DroppableFolder({
   isRoot,
   hasChildren,
   isCollapsed,
+  isDark,
   children,
   onSelect,
   onToggleCollapse,
   onRename,
   onDelete,
+  onColorChange,
 }: {
   folder: Folder;
   depth: number;
@@ -67,16 +90,35 @@ function DroppableFolder({
   isRoot: boolean;
   hasChildren: boolean;
   isCollapsed: boolean;
+  isDark: boolean;
   children: React.ReactNode;
   onSelect: () => void;
   onToggleCollapse: () => void;
   onRename: () => void;
   onDelete: () => void;
+  onColorChange: (color: string | undefined) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pickerOpen]);
+
+  const colorEntry = folder.color ? FOLDER_COLORS[folder.color] : null;
+  const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : undefined;
 
   useEffect(() => {
     const el = ref.current;
@@ -156,17 +198,60 @@ function DroppableFolder({
           ) : !isRoot ? (
             <span className="w-3.5 shrink-0" />
           ) : null}
-          <FolderIcon size={14} className={cn("shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")} />
+          <FolderIcon
+            size={14}
+            className={cn("shrink-0", isActive ? "text-primary-foreground" : !colorHex ? "text-muted-foreground" : undefined)}
+            style={!isActive && colorHex ? { color: colorHex } : undefined}
+          />
           {folder.name}
         </button>
         {!isRoot && (
-          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => setPickerOpen((v) => !v)}
+              className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors"
+              title="Change color"
+            >
+              <Palette size={12} style={colorHex ? { color: colorHex } : undefined} />
+            </button>
             <button onClick={onRename} className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors" title="Rename">
               <Pencil size={12} />
             </button>
             <button onClick={onDelete} className="p-1 cursor-pointer bg-transparent border-none text-destructive hover:text-destructive/80 transition-colors" title="Delete">
               <X size={12} />
             </button>
+            {pickerOpen && (
+              <div
+                ref={pickerRef}
+                className="absolute z-50 bottom-full right-0 mb-1 p-2 bg-popover border border-border rounded-lg shadow-lg"
+                style={{ minWidth: 130 }}
+              >
+                <div className="grid grid-cols-6 gap-1.5">
+                  {Object.entries(FOLDER_COLORS).map(([key, val]) => (
+                    <button
+                      key={key}
+                      title={key}
+                      onClick={() => {
+                        onColorChange(key === "default" ? undefined : key);
+                        setPickerOpen(false);
+                      }}
+                      className={cn(
+                        "w-4 h-4 rounded-full border transition-transform hover:scale-110",
+                        folder.color === key || (!folder.color && key === "default")
+                          ? "border-foreground/60 ring-1 ring-foreground/40"
+                          : "border-border/50",
+                      )}
+                      style={{
+                        background: val
+                          ? (isDark ? val.dark : val.light)
+                          : "transparent",
+                        ...(key === "default" ? { backgroundImage: "repeating-linear-gradient(45deg, #ccc 0, #ccc 1px, transparent 0, transparent 50%)", backgroundSize: "4px 4px" } : {}),
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -180,12 +265,14 @@ function DroppableFolder({
 type FolderTreeProps = {
   state: LibraryState;
   activeFolderId: string;
+  isDark: boolean;
   onSelectFolder: (id: string) => void;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
+  onColorChange: (id: string, color: string | undefined) => void;
 };
 
-function FolderTree({ state, activeFolderId, onSelectFolder, onRenameFolder, onDeleteFolder }: FolderTreeProps) {
+function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange }: FolderTreeProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const toggleFolder = (folderId: string) => {
@@ -213,6 +300,7 @@ function FolderTree({ state, activeFolderId, onSelectFolder, onRenameFolder, onD
         isRoot={folderId === state.rootFolderId}
         hasChildren={hasChildren}
         isCollapsed={isCollapsed}
+        isDark={isDark}
         onSelect={() => onSelectFolder(folderId)}
         onToggleCollapse={() => toggleFolder(folderId)}
         onRename={() => {
@@ -220,6 +308,7 @@ function FolderTree({ state, activeFolderId, onSelectFolder, onRenameFolder, onD
           if (newName) onRenameFolder(folderId, newName);
         }}
         onDelete={() => onDeleteFolder(folderId)}
+        onColorChange={(color) => onColorChange(folderId, color)}
       >
         {hasChildren && !isCollapsed && (
           <div>{childFolders.map((f) => renderFolder(f.id, depth + 1))}</div>
@@ -380,6 +469,11 @@ function SortableBookmarkItem({
             {!bookmark.snippet?.chatContext?.platform && isAiDomain(bookmark.domain) && (
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-primary border-primary/30 bg-primary/10">
                 AI
+              </Badge>
+            )}
+            {bookmark.media?.kind === "youtube" && bookmark.media.timestampLabel && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-red-500 border-red-500/30 bg-red-500/10 font-mono">
+                ▶ {bookmark.media.timestampLabel}
               </Badge>
             )}
           </div>
@@ -556,6 +650,26 @@ function PageGroupHeader({ group, expanded, onToggle }: {
   );
 }
 
+/* ─── Folder helpers ───────────────────────────────────────────── */
+
+function getDescendantFolderIds(
+  folderId: string,
+  folders: Record<string, import("../../core/types").Folder>
+): Set<string> {
+  const result = new Set<string>([folderId]);
+  const queue = [folderId];
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const f of Object.values(folders)) {
+      if (f.parentId === current && !result.has(f.id)) {
+        result.add(f.id);
+        queue.push(f.id);
+      }
+    }
+  }
+  return result;
+}
+
 /* ─── BookmarkList ──────────────────────────────────────────────── */
 
 type BookmarkListProps = {
@@ -576,32 +690,30 @@ type BookmarkListProps = {
 function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
 
+  const activeIds = isSearching ? null : getDescendantFolderIds(activeFolderId, folders);
+
   const filtered = bookmarks
-    .filter((b) => isSearching || b.folderId === activeFolderId)
+    .filter((b) => isSearching || activeIds!.has(b.folderId))
     .sort((a, b) => Number(b.sortKey) - Number(a.sortKey));
 
   const handleOpenBookmark = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
     if (b.type === "SNIPPET" && b.snippet) {
-      chrome.tabs.create({ url: b.url }, (newTab) => {
-        if (!newTab.id) return;
-        const tabId = newTab.id;
-        chrome.storage.local.set(
-          {
-            ZP_HIGHLIGHT_REQUEST: {
-              tabId,
-              url: b.url,
-              anchor: b.snippet,
-              bookmarkId: b.id,
-              timestamp: Date.now(),
-            },
+      chrome.storage.local.set(
+        {
+          ZP_HIGHLIGHT_REQUEST: {
+            url: b.url,
+            anchor: b.snippet,
+            bookmarkId: b.id,
+            timestamp: Date.now(),
           },
-          () => {
-            const err = chrome.runtime.lastError;
-            if (err) console.warn(`ZP: Failed to write highlight request: ${err.message}`);
-          }
-        );
-      });
+        },
+        () => {
+          const err = chrome.runtime.lastError;
+          if (err) { console.warn(`ZP: Failed to write highlight request: ${err.message}`); return; }
+          chrome.tabs.create({ url: b.url });
+        }
+      );
     } else {
       window.open(b.url, "_blank");
     }
@@ -683,8 +795,10 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       </h3>
       <div className="space-y-2">
         {groups.map((g) => {
+          const subfolderName = (b: Bookmark) =>
+            b.folderId !== activeFolderId ? folders[b.folderId]?.name : undefined;
           if (g.bookmarks.length === 1) {
-            return renderBookmarkItem(g.bookmarks[0]);
+            return renderBookmarkItem(g.bookmarks[0], subfolderName(g.bookmarks[0]));
           }
           const expanded = !collapsedUrls.has(g.url);
           return (
@@ -696,7 +810,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
               />
               {expanded && (
                 <div className="space-y-2 ml-1">
-                  {g.bookmarks.map((b) => renderBookmarkItem(b))}
+                  {g.bookmarks.map((b) => renderBookmarkItem(b, subfolderName(b)))}
                 </div>
               )}
             </div>
@@ -759,11 +873,11 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
           <Button variant="outline" size="icon" className="h-9 w-9 relative" asChild>
             <label>
               <Upload size={16} />
-              <input type="file" accept=".json" onChange={(e) => { if (e.target.files?.[0]) onImport(e.target.files[0]); }} className="hidden" />
+              <input type="file" accept=".json,.html,.htm" onChange={(e) => { if (e.target.files?.[0]) onImport(e.target.files[0]); e.target.value = ""; }} className="hidden" />
             </label>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Import</TooltipContent>
+        <TooltipContent>Import (ZeroPin JSON or browser HTML)</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -848,8 +962,27 @@ function isAiDomain(domain: string): boolean {
 
 /* ─── Library (main component) ──────────────────────────────────── */
 
+function countFolderContents(
+  folders: Record<string, Folder>,
+  bookmarks: Record<string, Bookmark>,
+  folderId: string,
+): { bookmarkCount: number; childFolderCount: number } {
+  const descendants = new Set<string>();
+  const collect = (id: string) => {
+    for (const f of Object.values(folders)) {
+      if (f.parentId === id) { descendants.add(f.id); collect(f.id); }
+    }
+  };
+  collect(folderId);
+  const bookmarkCount = Object.values(bookmarks).filter(
+    (b) => b.folderId === folderId || descendants.has(b.folderId),
+  ).length;
+  return { bookmarkCount, childFolderCount: descendants.size };
+}
+
 export default function Library() {
   const { showToast } = useToast();
+  const { isDark } = useTheme();
   const [state, setState] = useState<LibraryState | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -859,6 +992,19 @@ export default function Library() {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<"all" | "web" | "ai_answer" | "ai_prompt">("all");
+  const [browserImportPreview, setBrowserImportPreview] = useState<BrowserImportPreview | null>(null);
+  const [includeDups, setIncludeDups] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDraggingDivider = useRef(false);
+
+  const isPickerMode = new URLSearchParams(window.location.search).get("mode") === "picker";
+  const [pendingSave, setPendingSaveState] = useState<PendingSave | null>(null);
 
   useEffect(() => {
     getState().then((s) => {
@@ -883,6 +1029,11 @@ export default function Library() {
     chrome.storage.onChanged.addListener(onChanged);
     return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
+
+  useEffect(() => {
+    if (!isPickerMode) return;
+    getPendingSave().then((p) => setPendingSaveState(p));
+  }, [isPickerMode]);
 
   /* ─── DnD monitor ──────────────────────────────────────────── */
 
@@ -960,6 +1111,23 @@ export default function Library() {
     });
   }, [handleDrop]);
 
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDraggingDivider.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const maxWidth = Math.floor(rect.width * 0.5);
+      const newWidth = Math.min(maxWidth, Math.max(160, e.clientX - rect.left));
+      setSidebarWidth(newWidth);
+    };
+    const onMouseUp = () => { isDraggingDivider.current = false; };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
   if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
 
   const currentFolderId = activeFolderId ?? state.rootFolderId;
@@ -1009,49 +1177,121 @@ export default function Library() {
       setFolderModalOpen(false);
       setFolderNameDraft("");
       showToast(`Folder "${name}" created`);
+      notifyFoldersChanged();
     } catch (err) {
       console.error("Failed to create folder", err);
       showToast("Failed to create folder", "error");
     }
   };
 
-  const handleDeleteBookmark = async (id: string) => {
-    if (!confirm("Delete bookmark?")) return;
-    try {
-      await deleteBookmark(id);
-      await refreshState();
-      showToast("Bookmark deleted");
-    } catch (err) {
-      console.error("Failed to delete bookmark", err);
-      showToast("Failed to delete bookmark", "error");
-    }
+  const handleDeleteBookmark = (id: string) => {
+    setConfirmDialog({
+      title: "Delete bookmark?",
+      description: "This cannot be undone.",
+      onConfirm: async () => {
+        await deleteBookmark(id);
+        await refreshState();
+        showToast("Bookmark deleted");
+      },
+    });
   };
 
   const handleSelectFolder = async (id: string) => {
     setActiveFolderId(id);
-    try { await setLastUsedFolder(id); } catch { /* no-op */ }
+    if (isPickerMode && pendingSave) {
+      await handlePickerSave(id);
+    } else {
+      try { await setLastUsedFolder(id); } catch { /* no-op */ }
+    }
   };
+
+  const handlePickerSave = async (folderId: string) => {
+    if (!pendingSave) return;
+    try {
+      if (pendingSave.selectionText) {
+        await addSelectionBookmark({
+          url: pendingSave.url,
+          title: pendingSave.title,
+          selectedText: pendingSave.selectionText,
+          anchor: pendingSave.anchor,
+          folderId,
+        });
+      } else if (pendingSave.ytResult?.kind === "youtube") {
+        const media = {
+          kind: "youtube" as const,
+          videoId: pendingSave.ytResult.videoId,
+          timestampSec: pendingSave.ytResult.timestampSec,
+          timestampLabel: pendingSave.ytResult.timestampLabel,
+          canonicalUrl: pendingSave.ytResult.canonicalUrl,
+          openUrl: pendingSave.ytResult.openUrl,
+          captureMethod: pendingSave.ytResult.captureMethod,
+        };
+        await addPageBookmark(pendingSave.ytResult.openUrl, pendingSave.title, media, folderId);
+      } else {
+        await addPageBookmark(pendingSave.url, pendingSave.title, undefined, folderId);
+      }
+
+      await updateRecents(folderId);
+      await setPendingSave(null);
+      setPendingSaveState(null);
+      await refreshState();
+
+      chrome.runtime.sendMessage({ type: "ZP_FOLDERS_CHANGED" }).catch(() => {});
+
+      const folderName = state?.folders[folderId]?.name ?? "folder";
+      showToast(`Saved to ${folderName}`);
+
+      setTimeout(() => window.close(), 1200);
+    } catch (err) {
+      console.error("ZP: picker save failed", err);
+      showToast("Save failed", "error");
+    }
+  };
+
+  function notifyFoldersChanged() {
+    chrome.runtime.sendMessage({ type: "ZP_FOLDERS_CHANGED" }).catch(() => {});
+  }
 
   const handleRenameFolder = async (id: string, name: string) => {
     try {
       await renameFolder(id, name);
       await refreshState();
       showToast("Folder renamed");
+      notifyFoldersChanged();
     } catch (err) {
       console.error("Failed to rename folder", err);
       showToast("Failed to rename folder", "error");
     }
   };
 
-  const handleDeleteFolder = async (id: string) => {
-    if (!confirm("Delete folder?")) return;
+  const handleDeleteFolder = (id: string) => {
+    const folder = state.folders[id];
+    if (!folder) return;
+    const { bookmarkCount, childFolderCount } = countFolderContents(state.folders, state.bookmarks, id);
+    const isEmpty = bookmarkCount === 0 && childFolderCount === 0;
+    const description = isEmpty
+      ? "This action cannot be undone."
+      : `This folder contains ${bookmarkCount} bookmark(s) and ${childFolderCount} subfolder(s). All will be permanently deleted.`;
+    setConfirmDialog({
+      title: `Delete "${folder.name}"?`,
+      description,
+      onConfirm: async () => {
+        await deleteFolderCascade(id);
+        if (currentFolderId === id) setActiveFolderId(state.inboxFolderId);
+        await refreshState();
+        showToast("Folder deleted");
+        notifyFoldersChanged();
+      },
+    });
+  };
+
+  const handleSetFolderColor = async (id: string, color: string | undefined) => {
     try {
-      await deleteFolderIfEmpty(id);
+      await setFolderColor(id, color);
       await refreshState();
-      showToast("Folder deleted");
+      notifyFoldersChanged();
     } catch (err) {
-      console.error("Failed to delete folder", err);
-      showToast("Folder must be empty to delete", "error");
+      console.error("Failed to set folder color", err);
     }
   };
 
@@ -1081,27 +1321,71 @@ export default function Library() {
   const handleOpenBookmark = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
     if (b.type === "SNIPPET" && b.snippet) {
-      chrome.tabs.create({ url: b.url }, (newTab) => {
-        if (!newTab.id) return;
-        const tabId = newTab.id;
-        chrome.storage.local.set(
-          {
-            ZP_HIGHLIGHT_REQUEST: {
-              tabId,
-              url: b.url,
-              anchor: b.snippet,
-              bookmarkId: b.id,
-              timestamp: Date.now(),
-            },
+      chrome.storage.local.set(
+        {
+          ZP_HIGHLIGHT_REQUEST: {
+            url: b.url,
+            anchor: b.snippet,
+            bookmarkId: b.id,
+            timestamp: Date.now(),
           },
-          () => {
-            const err = chrome.runtime.lastError;
-            if (err) console.warn(`ZP: Failed to write highlight request: ${err.message}`);
-          }
-        );
-      });
+        },
+        () => {
+          const err = chrome.runtime.lastError;
+          if (err) { console.warn(`ZP: Failed to write highlight request: ${err.message}`); return; }
+          chrome.tabs.create({ url: b.url });
+        }
+      );
     } else {
       window.open(b.url, "_blank");
+    }
+  };
+
+  const handleBrowserFileSelected = async (file: File) => {
+    try {
+      const html = await file.text();
+      const source = detectBrowserSource(html);
+      const parsed = parseBrowserHtml(html);
+      if (parsed.bookmarks.length === 0) {
+        showToast("No bookmarks found in this file", "error");
+        return;
+      }
+      const preview = await buildImportPreview(parsed, source);
+      setIncludeDups(false);
+      setBrowserImportPreview(preview);
+    } catch (err) {
+      console.error("Failed to parse browser bookmarks", err);
+      showToast("Failed to read file", "error");
+    }
+  };
+
+  const handleBrowserImportConfirm = async () => {
+    if (!browserImportPreview) return;
+    const available = BOOKMARK_CAP - browserImportPreview.currentBookmarkCount;
+    const willImport = Math.min(
+      (includeDups ? browserImportPreview.newCount + browserImportPreview.dupCount : browserImportPreview.newCount),
+      Math.max(0, available),
+    );
+    if (willImport === 0) {
+      setBrowserImportPreview(null);
+      return;
+    }
+    try {
+      const { imported, dupSkipped, capSkipped } = await commitBrowserImport(
+        browserImportPreview._folders,
+        browserImportPreview._bookmarks,
+        browserImportPreview.source,
+        includeDups,
+      );
+      setBrowserImportPreview(null);
+      await refreshState();
+      const parts: string[] = [`Imported ${imported} bookmark${imported !== 1 ? "s" : ""}`];
+      if (dupSkipped > 0) parts.push(`${dupSkipped} duplicate${dupSkipped !== 1 ? "s" : ""} skipped`);
+      if (capSkipped > 0) parts.push(`${capSkipped} skipped (cap reached)`);
+      showToast(parts.join(" · "));
+    } catch (err) {
+      console.error("Failed to import browser bookmarks", err);
+      showToast("Import failed", "error");
     }
   };
 
@@ -1123,6 +1407,11 @@ export default function Library() {
   };
 
   const handleImport = async (file: File) => {
+    const isHtml = file.name.toLowerCase().endsWith(".html") || file.name.toLowerCase().endsWith(".htm");
+    if (isHtml) {
+      await handleBrowserFileSelected(file);
+      return;
+    }
     try {
       const text = await file.text();
       const data = JSON.parse(text);
@@ -1197,19 +1486,36 @@ export default function Library() {
             </div>
           </div>
 
+          {/* Picker mode banner */}
+          {isPickerMode && pendingSave && (
+            <div className="px-4 py-2.5 bg-primary/10 border-b border-primary/20 flex items-center gap-3">
+              <span className="text-sm font-medium text-primary shrink-0">Saving to\u2026</span>
+              <span className="text-sm text-foreground truncate flex-1">{pendingSave.title || pendingSave.url}</span>
+              <Button size="sm" variant="ghost" onClick={() => window.close()}>Cancel</Button>
+            </div>
+          )}
+
           {/* Two-column body */}
-          <div className="flex" style={{ height: "calc(92vh - 110px)" }}>
-            <div className="w-60 border-r border-border p-3 overflow-y-auto bg-sidebar">
+          <div ref={containerRef} className="flex" style={{ height: "calc(92vh - 110px)" }}>
+            <div className="flex-shrink-0 p-3 overflow-y-auto bg-sidebar" style={{ width: sidebarWidth }}>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2.5">Folders</div>
               <FolderTree
                 state={state}
                 activeFolderId={currentFolderId}
+                isDark={isDark}
                 onSelectFolder={handleSelectFolder}
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
+                onColorChange={handleSetFolderColor}
               />
             </div>
-            <div className="flex-1 p-4 overflow-y-auto bg-background">
+            {/* Drag divider */}
+            <div
+              onMouseDown={(e) => { isDraggingDivider.current = true; e.preventDefault(); }}
+              className="w-1.5 flex-shrink-0 border-r border-border cursor-col-resize hover:bg-primary/20 transition-colors"
+              title="Drag to resize"
+            />
+            <div className="flex-1 min-w-0 p-4 overflow-y-auto bg-background">
               {!isSearching && <RecentPins bookmarks={allBookmarks} onOpen={handleOpenBookmark} />}
               <BookmarkList
                 bookmarks={filtered}
@@ -1245,18 +1551,19 @@ export default function Library() {
               setSelectedIds(new Set(visible.map((b) => b.id)));
             }}
             onDeselectAll={() => setSelectedIds(new Set())}
-            onDelete={async () => {
-              if (!confirm(`Delete ${selectedIds.size} bookmark(s)?`)) return;
-              try {
-                await bulkDeleteBookmarks(Array.from(selectedIds));
-                setSelectedIds(new Set());
-                setBulkMode(false);
-                await refreshState();
-                showToast(`${selectedIds.size} bookmark(s) deleted`);
-              } catch (err) {
-                console.error("Bulk delete failed", err);
-                showToast("Failed to delete bookmarks", "error");
-              }
+            onDelete={() => {
+              const count = selectedIds.size;
+              setConfirmDialog({
+                title: `Delete ${count} bookmark(s)?`,
+                description: "This cannot be undone.",
+                onConfirm: async () => {
+                  await bulkDeleteBookmarks(Array.from(selectedIds));
+                  setSelectedIds(new Set());
+                  setBulkMode(false);
+                  await refreshState();
+                  showToast(`${count} bookmark(s) deleted`);
+                },
+              });
             }}
             onMove={async (targetFolderId) => {
               try {
@@ -1272,6 +1579,23 @@ export default function Library() {
             }}
           />
         )}
+
+        {/* Generic confirm dialog — replaces window.confirm() */}
+        <Dialog open={!!confirmDialog} onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{confirmDialog?.title}</DialogTitle>
+              <DialogDescription>{confirmDialog?.description}</DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" onClick={() => setConfirmDialog(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={async () => {
+                await confirmDialog?.onConfirm();
+                setConfirmDialog(null);
+              }}>Delete</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={isFolderModalOpen} onOpenChange={setFolderModalOpen}>
           <DialogContent className="sm:max-w-80">
@@ -1293,6 +1617,77 @@ export default function Library() {
               <Button onClick={handleCreateFolderSubmit}>Create</Button>
             </div>
           </DialogContent>
+        </Dialog>
+
+        {/* Browser import preview dialog */}
+        <Dialog open={!!browserImportPreview} onOpenChange={(open) => { if (!open) setBrowserImportPreview(null); }}>
+          {browserImportPreview && (() => {
+            const available = Math.max(0, BOOKMARK_CAP - browserImportPreview.currentBookmarkCount);
+            const wantToImport = includeDups
+              ? browserImportPreview.newCount + browserImportPreview.dupCount
+              : browserImportPreview.newCount;
+            const importableCount = Math.min(wantToImport, available);
+            const capExceeded = wantToImport > available;
+            return (
+              <DialogContent className="sm:max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Import from {browserSourceLabel(browserImportPreview.source)}</DialogTitle>
+                  <DialogDescription>Review before importing</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Detected browser</span>
+                    <span className="font-medium">{browserSourceLabel(browserImportPreview.source)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Folders found</span>
+                    <span className="font-medium">{browserImportPreview.parsedFolderCount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Bookmarks found</span>
+                    <span className="font-medium">{browserImportPreview.parsedBookmarkCount}</span>
+                  </div>
+                  <div className="border-t border-border pt-2.5 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">New bookmarks</span>
+                      <span className="font-medium text-success">{browserImportPreview.newCount}</span>
+                    </div>
+                    {browserImportPreview.dupCount > 0 && (
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-muted-foreground cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={includeDups}
+                            onChange={(e) => setIncludeDups(e.target.checked)}
+                            className="cursor-pointer"
+                          />
+                          Include {browserImportPreview.dupCount} duplicate{browserImportPreview.dupCount !== 1 ? "s" : ""} already in ZeroPin
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                  {capExceeded && (
+                    <div className="bg-destructive/10 text-destructive rounded-md p-3 text-xs">
+                      Bookmark limit ({BOOKMARK_CAP.toLocaleString()}) reached. Only {importableCount} of {wantToImport} bookmarks will be imported. Delete some existing bookmarks to import more.
+                    </div>
+                  )}
+                  {importableCount === 0 && (
+                    <div className="bg-muted rounded-md p-3 text-xs text-muted-foreground">
+                      {browserImportPreview.newCount === 0 && !includeDups
+                        ? "All bookmarks in this file are already in ZeroPin. Enable \"Include duplicates\" to import anyway."
+                        : "Nothing to import — bookmark limit reached."}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2 justify-end mt-2">
+                  <Button variant="outline" onClick={() => setBrowserImportPreview(null)}>Cancel</Button>
+                  <Button onClick={handleBrowserImportConfirm} disabled={importableCount === 0}>
+                    Import {importableCount} bookmark{importableCount !== 1 ? "s" : ""}
+                  </Button>
+                </div>
+              </DialogContent>
+            );
+          })()}
         </Dialog>
       </div>
     </>

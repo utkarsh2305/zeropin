@@ -32,6 +32,14 @@ function Popup() {
 
   useEffect(() => {
     getState().then(setState);
+
+    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (area === "local" && changes["zp_state"]) {
+        setState(changes["zp_state"].newValue as LibraryState);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
   }, []);
 
   // Derived values
@@ -67,18 +75,20 @@ function Popup() {
   const openPin = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
     if (b.type === "SNIPPET" && b.snippet) {
-      chrome.tabs.create({ url: b.url }, (newTab) => {
-        if (!newTab?.id) return;
-        chrome.storage.local.set({
+      // Set storage BEFORE creating the tab so the on-load poll always finds it.
+      // Doing this inside chrome.tabs.create's callback is unreliable: the popup
+      // window is destroyed when the new tab steals focus, killing the callback.
+      chrome.storage.local.set(
+        {
           ZP_HIGHLIGHT_REQUEST: {
-            tabId: newTab.id,
             url: b.url,
             anchor: b.snippet,
             bookmarkId: b.id,
             timestamp: Date.now(),
           },
-        });
-      });
+        },
+        () => { chrome.tabs.create({ url: b.url }); }
+      );
     } else {
       chrome.tabs.create({ url: b.url });
     }

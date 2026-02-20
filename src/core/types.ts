@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 5 as const;
+export const SCHEMA_VERSION = 6 as const;
 
 /** Optional media metadata attached to a bookmark. Currently only "youtube". */
 export interface BookmarkMedia {
@@ -88,7 +88,8 @@ export interface Bookmark {
 export interface LibraryState {
   schemaVersion: number;
   rootFolderId: FolderId;
-  inboxFolderId: FolderId;
+  /** @deprecated Removed in schema v6. Kept optional so migration can read the old value. */
+  inboxFolderId?: FolderId;
   folders: Record<FolderId, Folder>;
   bookmarks: Record<BookmarkId, Bookmark>;
   lastUsedFolderId?: FolderId;

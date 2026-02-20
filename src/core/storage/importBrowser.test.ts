@@ -43,10 +43,8 @@ function makeLibraryState() {
   return {
     schemaVersion: SCHEMA_VERSION,
     rootFolderId: "root",
-    inboxFolderId: "inbox",
     folders: {
       root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
-      inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 1000, updatedAt: 1000 },
     },
     bookmarks: {},
   };
@@ -242,7 +240,7 @@ describe("buildImportPreview", () => {
     // Add one existing bookmark to storage
     const state = makeLibraryState();
     (state.bookmarks as any)["existing-1"] = {
-      id: "existing-1", folderId: "inbox", type: "PAGE", name: "GitHub",
+      id: "existing-1", folderId: "root", type: "PAGE", name: "GitHub",
       url: "https://github.com", domain: "github.com",
       sortKey: "1", createdAt: 1, updatedAt: 1,
     };
@@ -265,7 +263,7 @@ describe("buildImportPreview", () => {
   it("is case-insensitive when checking for duplicates", async () => {
     const state = makeLibraryState();
     (state.bookmarks as any)["existing-1"] = {
-      id: "existing-1", folderId: "inbox", type: "PAGE", name: "Ex",
+      id: "existing-1", folderId: "root", type: "PAGE", name: "Ex",
       url: "https://EXAMPLE.COM", domain: "example.com",
       sortKey: "1", createdAt: 1, updatedAt: 1,
     };
@@ -309,7 +307,7 @@ describe("commitBrowserImport", () => {
     // Pre-populate with one existing bookmark
     const state = makeLibraryState();
     (state.bookmarks as any)["dup-1"] = {
-      id: "dup-1", folderId: "inbox", type: "PAGE", name: "Site A",
+      id: "dup-1", folderId: "root", type: "PAGE", name: "Site A",
       url: "https://sitea.example.com", domain: "sitea.example.com",
       sortKey: "1", createdAt: 1, updatedAt: 1,
     };
@@ -328,7 +326,7 @@ describe("commitBrowserImport", () => {
   it("imports duplicates when includeDups=true", async () => {
     const state = makeLibraryState();
     (state.bookmarks as any)["dup-1"] = {
-      id: "dup-1", folderId: "inbox", type: "PAGE", name: "Site A",
+      id: "dup-1", folderId: "root", type: "PAGE", name: "Site A",
       url: "https://sitea.example.com", domain: "sitea.example.com",
       sortKey: "1", createdAt: 1, updatedAt: 1,
     };
@@ -349,7 +347,7 @@ describe("commitBrowserImport", () => {
     const existingCount = BOOKMARK_CAP - 1;
     for (let i = 0; i < existingCount; i++) {
       (state.bookmarks as any)[`bk-${i}`] = {
-        id: `bk-${i}`, folderId: "inbox", type: "PAGE", name: `BK ${i}`,
+        id: `bk-${i}`, folderId: "root", type: "PAGE", name: `BK ${i}`,
         url: `https://existing-${i}.example.com`, domain: "example.com",
         sortKey: String(i), createdAt: i, updatedAt: i,
       };

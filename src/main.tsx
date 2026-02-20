@@ -68,7 +68,6 @@ function Popup() {
   // Current folder
   const currentFolder = state
     ? state.folders[state.lastUsedFolderId ?? ""] ??
-      state.folders[state.inboxFolderId] ??
       state.folders[state.rootFolderId]
     : null;
 

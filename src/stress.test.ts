@@ -42,7 +42,7 @@ function makeBaseState(bookmarkCount: number) {
   for (let i = 0; i < bookmarkCount; i++) {
     bookmarks[`bk-${i}`] = {
       id: `bk-${i}`,
-      folderId: "inbox",
+      folderId: "root",
       type: "PAGE",
       name: `Bookmark ${i} — a title that is somewhat descriptive`,
       url: `https://example-${i}.com/page/article`,
@@ -56,10 +56,8 @@ function makeBaseState(bookmarkCount: number) {
   return {
     schemaVersion: SCHEMA_VERSION,
     rootFolderId: "root",
-    inboxFolderId: "inbox",
     folders: {
       root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 0, updatedAt: 0 },
-      inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 0, updatedAt: 0 },
     },
     bookmarks,
   };
@@ -130,7 +128,7 @@ describe("Storage — large state performance", () => {
 
   it("deleteFolderCascade with 200-bookmark subfolder < 500ms", async () => {
     const state = makeBaseState(0);
-    state.folders["target"] = { id: "target", parentId: "root", name: "Target", sortKey: "t", createdAt: 0, updatedAt: 0 };
+    (state.folders as Record<string, any>)["target"] = { id: "target", parentId: "root", name: "Target", sortKey: "t", createdAt: 0, updatedAt: 0 };
     for (let i = 0; i < 200; i++) {
       state.bookmarks[`tbk-${i}`] = {
         id: `tbk-${i}`, folderId: "target", type: "PAGE", name: `T ${i}`,
@@ -251,8 +249,7 @@ describe("Recents — performance", () => {
     setStoreState({
       schemaVersion: SCHEMA_VERSION,
       rootFolderId: "root",
-      inboxFolderId: "inbox",
-      folders: { root: { id: "root", parentId: null, name: "ZP", sortKey: "m", createdAt: 0, updatedAt: 0 }, inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 0, updatedAt: 0 } },
+      folders: { root: { id: "root", parentId: null, name: "ZP", sortKey: "m", createdAt: 0, updatedAt: 0 } },
       bookmarks: {},
     });
     store["zp_recents"] = [];

@@ -57,10 +57,8 @@ function makeState(): LibraryState {
   return {
     schemaVersion: SCHEMA_VERSION,
     rootFolderId: "root",
-    inboxFolderId: "inbox",
     folders: {
       root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
-      inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 1000, updatedAt: 1000 },
     },
     bookmarks: {},
   };
@@ -308,9 +306,9 @@ describe("Context menu recents — save → updateRecents → rebuild menu", () 
 
   it("saving via recent item updates recents list", async () => {
     await addPageBookmark("https://example.com", "Example");
-    await updateRecents("inbox");
+    await updateRecents("root");
     const ids = await getRecentFolderIds();
-    expect(ids[0]).toBe("inbox");
+    expect(ids[0]).toBe("root");
   });
 
   it("recents list caps at RECENTS_MAX (5) and drops oldest", async () => {
@@ -335,21 +333,22 @@ describe("Context menu recents — save → updateRecents → rebuild menu", () 
   });
 
   it("saving to same folder keeps it at front", async () => {
-    await updateRecents("inbox");
+    await updateRecents("root");
     const folderId = await createFolder({ parentId: "root", name: "Work" });
     await updateRecents(folderId);
-    await updateRecents("inbox");
+    await updateRecents("root");
     const ids = await getRecentFolderIds();
-    expect(ids[0]).toBe("inbox");
-    expect(ids.filter((id) => id === "inbox")).toHaveLength(1); // no duplicates
+    expect(ids[0]).toBe("root");
+    expect(ids.filter((id) => id === "root")).toHaveLength(1); // no duplicates
   });
 
   it("computeFolderLabel uses parent name for subfolders", async () => {
     const state = makeState();
-    state.folders["proj"] = { id: "proj", parentId: "inbox", name: "ProjectX", sortKey: "p", createdAt: 1, updatedAt: 1 };
+    state.folders["work"] = { id: "work", parentId: "root", name: "Work", sortKey: "w", createdAt: 1, updatedAt: 1 };
+    state.folders["proj"] = { id: "proj", parentId: "work", name: "ProjectX", sortKey: "p", createdAt: 1, updatedAt: 1 };
     setStoreState(state);
     const label = computeFolderLabel("proj", state.folders);
-    expect(label).toBe("Inbox \u203a ProjectX");
+    expect(label).toBe("Work \u203a ProjectX");
   });
 
   it("recents filter removes deleted folder ids", async () => {
@@ -357,7 +356,7 @@ describe("Context menu recents — save → updateRecents → rebuild menu", () 
     state.folders["temp"] = { id: "temp", parentId: "root", name: "Temp", sortKey: "t", createdAt: 1, updatedAt: 1 };
     setStoreState(state);
     // Set recents WITHOUT replacing store (setStoreState would overwrite zp_recents)
-    store["zp_recents"] = ["inbox", "temp"];
+    store["zp_recents"] = ["root", "temp"];
 
     // Simulate deleting "temp" folder by patching the stored state directly
     const state2 = await getState();
@@ -369,7 +368,7 @@ describe("Context menu recents — save → updateRecents → rebuild menu", () 
     const rawRecents = await getRecentFolderIds();
     const state3 = await getState();
     const validRecents = rawRecents.filter((id) => !!state3.folders[id]);
-    expect(validRecents).toEqual(["inbox"]);
+    expect(validRecents).toEqual(["root"]);
     expect(validRecents).not.toContain("temp");
   });
 });

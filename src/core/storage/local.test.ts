@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { LibraryState } from "../types";
 import { SCHEMA_VERSION } from "../types";
-import type { Bookmark } from "../types";
+
 
 // ── Mock chrome.storage.local ──
 
@@ -55,10 +55,8 @@ function makeState(): LibraryState {
   return {
     schemaVersion: SCHEMA_VERSION,
     rootFolderId: "root",
-    inboxFolderId: "inbox",
     folders: {
       root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
-      inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 1000, updatedAt: 1000 },
       folderB: { id: "folderB", parentId: "root", name: "Folder B", sortKey: "b", createdAt: 1000, updatedAt: 1000 },
     },
     bookmarks: {},
@@ -184,7 +182,7 @@ describe("addSelectionBookmark dedup", () => {
     const state = makeState();
     state.bookmarks["old-1"] = {
       id: "old-1",
-      folderId: "inbox",
+      folderId: "root",
       type: "PAGE",
       name: "Old Bookmark",
       url: "https://example.com",
@@ -208,8 +206,8 @@ describe("bulkDeleteBookmarks", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      b1: { id: "b1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
-      b2: { id: "b2", folderId: "inbox", type: "PAGE", name: "B2", url: "https://b.com", domain: "b.com", sortKey: "2", createdAt: 2, updatedAt: 2 },
+      b1: { id: "b1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      b2: { id: "b2", folderId: "root", type: "PAGE", name: "B2", url: "https://b.com", domain: "b.com", sortKey: "2", createdAt: 2, updatedAt: 2 },
       b3: { id: "b3", folderId: "folderB", type: "PAGE", name: "B3", url: "https://c.com", domain: "c.com", sortKey: "3", createdAt: 3, updatedAt: 3 },
     };
     setStoreState(state);
@@ -241,8 +239,8 @@ describe("bulkMoveBookmarks", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      b1: { id: "b1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
-      b2: { id: "b2", folderId: "inbox", type: "PAGE", name: "B2", url: "https://b.com", domain: "b.com", sortKey: "2", createdAt: 2, updatedAt: 2 },
+      b1: { id: "b1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      b2: { id: "b2", folderId: "root", type: "PAGE", name: "B2", url: "https://b.com", domain: "b.com", sortKey: "2", createdAt: 2, updatedAt: 2 },
       b3: { id: "b3", folderId: "folderB", type: "PAGE", name: "B3", url: "https://c.com", domain: "c.com", sortKey: "3", createdAt: 3, updatedAt: 3 },
     };
     setStoreState(state);
@@ -258,14 +256,14 @@ describe("bulkMoveBookmarks", () => {
   it("with empty array is a no-op", async () => {
     await bulkMoveBookmarks([], "folderB");
     const state = await getState();
-    expect(state.bookmarks["b1"].folderId).toBe("inbox");
+    expect(state.bookmarks["b1"].folderId).toBe("root");
   });
 
   it("only modifies specified bookmarks, leaves others unchanged", async () => {
     await bulkMoveBookmarks(["b1"], "folderB");
     const state = await getState();
     expect(state.bookmarks["b1"].folderId).toBe("folderB");
-    expect(state.bookmarks["b2"].folderId).toBe("inbox");
+    expect(state.bookmarks["b2"].folderId).toBe("root");
     expect(state.bookmarks["b3"].folderId).toBe("folderB");
   });
 });
@@ -287,11 +285,11 @@ describe("addPageBookmark with explicit folderId", () => {
     expect(bm.url).toBe("https://work.example.com");
   });
 
-  it("falls back to inboxFolderId when folderId omitted", async () => {
+  it("falls back to rootFolderId when folderId omitted", async () => {
     await addPageBookmark("https://example.com", "Example");
     const state = await getState();
     const bm = Object.values(state.bookmarks)[0];
-    expect(bm.folderId).toBe("inbox");
+    expect(bm.folderId).toBe("root");
   });
 
   it("deduplicates by URL within same explicit folder", async () => {
@@ -349,7 +347,7 @@ describe("deleteBookmark", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -373,7 +371,7 @@ describe("moveBookmark", () => {
     const state = makeState();
     state.folders["work"] = { id: "work", parentId: "root", name: "Work", sortKey: "b", createdAt: 1000, updatedAt: 1000 };
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -399,7 +397,7 @@ describe("renameBookmark", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "Old Name", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "Old Name", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -424,7 +422,7 @@ describe("setBookmarkNotes", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -449,9 +447,9 @@ describe("renameFolder", () => {
   beforeEach(() => setStoreState(makeState()));
 
   it("renames the folder", async () => {
-    await renameFolder("inbox", "My Inbox");
+    await renameFolder("folderB", "My Folder B");
     const state = await getState();
-    expect(state.folders["inbox"].name).toBe("My Inbox");
+    expect(state.folders["folderB"].name).toBe("My Folder B");
   });
 
   it("throws for unknown folder id", async () => {
@@ -465,16 +463,16 @@ describe("setFolderColor", () => {
   beforeEach(() => setStoreState(makeState()));
 
   it("sets folder color", async () => {
-    await setFolderColor("inbox", "#ff0000");
+    await setFolderColor("folderB", "#ff0000");
     const state = await getState();
-    expect(state.folders["inbox"].color).toBe("#ff0000");
+    expect(state.folders["folderB"].color).toBe("#ff0000");
   });
 
   it("clears folder color when set to undefined", async () => {
-    await setFolderColor("inbox", "#ff0000");
-    await setFolderColor("inbox", undefined);
+    await setFolderColor("folderB", "#ff0000");
+    await setFolderColor("folderB", undefined);
     const state = await getState();
-    expect(state.folders["inbox"].color).toBeUndefined();
+    expect(state.folders["folderB"].color).toBeUndefined();
   });
 });
 
@@ -484,9 +482,9 @@ describe("setLastUsedFolder", () => {
   beforeEach(() => setStoreState(makeState()));
 
   it("persists lastUsedFolderId", async () => {
-    await setLastUsedFolder("inbox");
+    await setLastUsedFolder("folderB");
     const state = await getState();
-    expect(state.lastUsedFolderId).toBe("inbox");
+    expect(state.lastUsedFolderId).toBe("folderB");
   });
 
   it("throws for unknown folder id", async () => {
@@ -503,7 +501,7 @@ describe("deleteFolderIfEmpty", () => {
     state.folders["withChild"] = { id: "withChild", parentId: "root", name: "WithChild", sortKey: "d", createdAt: 1, updatedAt: 1 };
     state.folders["child"] = { id: "child", parentId: "withChild", name: "Child", sortKey: "e", createdAt: 1, updatedAt: 1 };
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "folderB", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -519,7 +517,7 @@ describe("deleteFolderIfEmpty", () => {
   });
 
   it("throws when folder has bookmarks", async () => {
-    await expect(deleteFolderIfEmpty("inbox")).rejects.toThrow(/bookmark/i);
+    await expect(deleteFolderIfEmpty("folderB")).rejects.toThrow(/bookmark/i);
   });
 
   it("throws for unknown folder id", async () => {
@@ -535,7 +533,7 @@ describe("deleteFolderCascade", () => {
     state.folders["parent"] = { id: "parent", parentId: "root", name: "Parent", sortKey: "p", createdAt: 1, updatedAt: 1 };
     state.folders["child1"] = { id: "child1", parentId: "parent", name: "Child1", sortKey: "c", createdAt: 1, updatedAt: 1 };
     state.bookmarks = {
-      bkInbox: { id: "bkInbox", folderId: "inbox", type: "PAGE", name: "Inbox BM", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bkRoot: { id: "bkRoot", folderId: "root", type: "PAGE", name: "Root BM", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
       bkParent: { id: "bkParent", folderId: "parent", type: "PAGE", name: "Parent BM", url: "https://b.com", domain: "b.com", sortKey: "2", createdAt: 2, updatedAt: 2 },
       bkChild: { id: "bkChild", folderId: "child1", type: "PAGE", name: "Child BM", url: "https://c.com", domain: "c.com", sortKey: "3", createdAt: 3, updatedAt: 3 },
     };
@@ -559,15 +557,11 @@ describe("deleteFolderCascade", () => {
   it("preserves bookmarks in other folders", async () => {
     await deleteFolderCascade("parent");
     const state = await getState();
-    expect(state.bookmarks["bkInbox"]).toBeDefined();
+    expect(state.bookmarks["bkRoot"]).toBeDefined();
   });
 
   it("throws for root folder", async () => {
     await expect(deleteFolderCascade("root")).rejects.toThrow(/root/i);
-  });
-
-  it("throws for inbox folder", async () => {
-    await expect(deleteFolderCascade("inbox")).rejects.toThrow(/inbox/i);
   });
 
   it("resets lastUsedFolderId when deleted folder was lastUsed", async () => {
@@ -577,7 +571,7 @@ describe("deleteFolderCascade", () => {
 
     await deleteFolderCascade("parent");
     const state = await getState();
-    expect(state.lastUsedFolderId).toBe(state.inboxFolderId);
+    expect(state.lastUsedFolderId).toBe(state.rootFolderId);
   });
 });
 
@@ -613,7 +607,7 @@ describe("recordBookmarkOpen", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "B1", url: "https://a.com", domain: "a.com", sortKey: "1", createdAt: 1, updatedAt: 1 },
     };
     setStoreState(state);
   });
@@ -643,9 +637,9 @@ describe("moveBookmarkWithinFolder", () => {
   beforeEach(() => {
     const state = makeState();
     state.bookmarks = {
-      bk1: { id: "bk1", folderId: "inbox", type: "PAGE", name: "First", url: "https://a.com", domain: "a.com", sortKey: "3000", createdAt: 1, updatedAt: 1 },
-      bk2: { id: "bk2", folderId: "inbox", type: "PAGE", name: "Second", url: "https://b.com", domain: "b.com", sortKey: "2000", createdAt: 2, updatedAt: 2 },
-      bk3: { id: "bk3", folderId: "inbox", type: "PAGE", name: "Third", url: "https://c.com", domain: "c.com", sortKey: "1000", createdAt: 3, updatedAt: 3 },
+      bk1: { id: "bk1", folderId: "root", type: "PAGE", name: "First", url: "https://a.com", domain: "a.com", sortKey: "3000", createdAt: 1, updatedAt: 1 },
+      bk2: { id: "bk2", folderId: "root", type: "PAGE", name: "Second", url: "https://b.com", domain: "b.com", sortKey: "2000", createdAt: 2, updatedAt: 2 },
+      bk3: { id: "bk3", folderId: "root", type: "PAGE", name: "Third", url: "https://c.com", domain: "c.com", sortKey: "1000", createdAt: 3, updatedAt: 3 },
     };
     setStoreState(state);
   });
@@ -696,7 +690,7 @@ describe("moveFolderToParent", () => {
   });
 
   it("prevents moving root folder", async () => {
-    await expect(moveFolderToParent("root", "inbox")).rejects.toThrow(/root/i);
+    await expect(moveFolderToParent("root", "folderB")).rejects.toThrow(/root/i);
   });
 
   it("is a no-op when moving to same folder", async () => {

@@ -48,21 +48,10 @@ export async function getState(): Promise<LibraryState> {
       await storageSet(KEY, migrated);
     }
 
-    // Migration: add inboxFolderId for existing installs
-    if (!migrated.inboxFolderId) {
-      const inbox = Object.values(migrated.folders).find(
-        (f) => f.name === "Inbox" && f.parentId === migrated.rootFolderId
-      );
-      if (inbox) {
-        migrated.inboxFolderId = inbox.id;
-        await storageSet(KEY, migrated);
-      }
-    }
     return migrated;
   }
 
   const rootId = crypto.randomUUID();
-  const inboxId = crypto.randomUUID();
   const now_ts = now();
 
   const initial: LibraryState = {
@@ -77,18 +66,9 @@ export async function getState(): Promise<LibraryState> {
         createdAt: now_ts,
         updatedAt: now_ts,
       },
-      [inboxId]: {
-        id: inboxId,
-        parentId: rootId,
-        name: "Inbox",
-        sortKey: "a",
-        createdAt: now_ts,
-        updatedAt: now_ts,
-      },
     },
-    inboxFolderId: inboxId,
     bookmarks: {},
-    lastUsedFolderId: inboxId,
+    lastUsedFolderId: rootId,
   };
 
   await storageSet(KEY, initial);
@@ -131,7 +111,7 @@ export function computeSnippetHash(url: string, snippetText?: string): string {
 
 export async function addPageBookmark(url: string, title: string, media?: BookmarkMedia, inputFolderId?: string): Promise<void> {
   const state = await getState();
-  const folderId = inputFolderId ?? state.inboxFolderId ?? state.rootFolderId;
+  const folderId = inputFolderId ?? state.rootFolderId;
   const hash = computeSnippetHash(url);
 
   // Dedup: check for existing bookmark with same hash in same folder
@@ -211,7 +191,7 @@ export async function addSelectionBookmark(input: {
   };
 }): Promise<void> {
   const state = await getState();
-  const folderId = input.folderId ?? state.inboxFolderId ?? state.rootFolderId;
+  const folderId = input.folderId ?? state.rootFolderId;
   const hash = computeSnippetHash(input.url, input.selectedText);
 
   // Dedup: check for existing bookmark with same hash in same folder
@@ -322,7 +302,6 @@ export async function deleteFolderCascade(folderId: string): Promise<void> {
   const state = await getState();
   if (!state.folders[folderId]) throw new Error(`Folder ${folderId} not found`);
   if (folderId === state.rootFolderId) throw new Error("Cannot delete root folder");
-  if (folderId === state.inboxFolderId) throw new Error("Cannot delete Inbox folder");
 
   // Collect target + all descendant folder IDs
   const toDelete = new Set<string>();
@@ -343,7 +322,7 @@ export async function deleteFolderCascade(folderId: string): Promise<void> {
 
   // Reset lastUsedFolderId if it was deleted
   if (state.lastUsedFolderId && toDelete.has(state.lastUsedFolderId)) {
-    state.lastUsedFolderId = state.inboxFolderId;
+    state.lastUsedFolderId = state.rootFolderId;
   }
 
   await setState(state);

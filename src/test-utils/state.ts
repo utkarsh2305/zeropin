@@ -15,7 +15,7 @@ export function makeFolder(overrides: Partial<Folder> & { id?: string } = {}): F
   return {
     id,
     parentId: null,
-    name: "Inbox",
+    name: "ZeroPin",
     sortKey: "1000",
     createdAt: 1000,
     updatedAt: 1000,
@@ -27,7 +27,7 @@ export function makeBookmark(overrides: Partial<Bookmark> & { id?: string } = {}
   const id = overrides.id ?? uid();
   return {
     id,
-    folderId: "inbox",
+    folderId: "root",
     type: "PAGE",
     name: "Example",
     url: "https://example.com",
@@ -43,10 +43,8 @@ export function makeState(overrides: Partial<LibraryState> = {}): LibraryState {
   return {
     schemaVersion: SCHEMA_VERSION,
     rootFolderId: "root",
-    inboxFolderId: "inbox",
     folders: {
       root: makeFolder({ id: "root", parentId: null, name: "ZeroPin", sortKey: "m" }),
-      inbox: makeFolder({ id: "inbox", parentId: "root", name: "Inbox", sortKey: "a" }),
     },
     bookmarks: {},
     ...overrides,

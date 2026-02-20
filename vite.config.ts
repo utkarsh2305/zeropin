@@ -38,12 +38,12 @@ export default defineConfig({
         library: "library.html",
         walkthrough: "walkthrough.html",
         background: "src/background.ts",
-        contentScript: "src/contentScript.ts"
+        // contentScript is built separately via vite.content.config.ts as an
+        // IIFE so it has no ES module import statements when Chrome injects it.
       },
       output: {
         entryFileNames: (chunk) => {
           if (chunk.name === "background") return "background.js";
-          if (chunk.name === "contentScript") return "contentScript.js";
           return "assets/[name].js";
         }
       }

@@ -52,6 +52,25 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 5;
     return state;
   },
+  // v5 → v6: remove Inbox system folder; move its bookmarks directly to root
+  5: (state) => {
+    const inboxId: string | undefined = state.inboxFolderId;
+    if (inboxId && state.folders[inboxId]) {
+      // Re-home all inbox bookmarks to root
+      for (const b of Object.values(state.bookmarks) as any[]) {
+        if (b.folderId === inboxId) b.folderId = state.rootFolderId;
+      }
+      // Delete the inbox folder
+      delete state.folders[inboxId];
+      // Reset lastUsedFolderId if it was pointing at inbox
+      if (state.lastUsedFolderId === inboxId) {
+        state.lastUsedFolderId = state.rootFolderId;
+      }
+    }
+    delete state.inboxFolderId;
+    state.schemaVersion = 6;
+    return state;
+  },
 };
 
 /**

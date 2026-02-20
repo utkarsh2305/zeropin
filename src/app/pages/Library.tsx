@@ -1014,7 +1014,7 @@ export default function Library() {
       if (folderParam && s.folders[folderParam]) {
         setActiveFolderId(folderParam);
       } else {
-        setActiveFolderId(s.inboxFolderId ?? s.rootFolderId);
+        setActiveFolderId(s.rootFolderId);
       }
     });
 
@@ -1277,7 +1277,7 @@ export default function Library() {
       description,
       onConfirm: async () => {
         await deleteFolderCascade(id);
-        if (currentFolderId === id) setActiveFolderId(state.inboxFolderId);
+        if (currentFolderId === id) setActiveFolderId(state.rootFolderId);
         await refreshState();
         showToast("Folder deleted");
         notifyFoldersChanged();

@@ -57,7 +57,7 @@ describe("migrateState", () => {
     expect(result.bookmarks["b1"].lastResolvedConfidence).toBeUndefined();
   });
 
-  it("v4 state → migrated to v5 (folders get color field)", () => {
+  it("v4 state → migrated to current (folders get color field, inbox removed)", () => {
     const raw = { ...baseState, schemaVersion: 4 };
     const result = migrateState(raw);
     expect(result.schemaVersion).toBe(SCHEMA_VERSION);
@@ -65,11 +65,13 @@ describe("migrateState", () => {
     expect("color" in result.folders["root"]).toBe(true);
   });
 
-  it("v5 state → returned unchanged", () => {
+  it("v5 state → migrated to v6 (inbox folder removed, bookmarks moved to root)", () => {
     const raw = { ...baseState, schemaVersion: 5 };
     const result = migrateState(raw);
-    expect(result.schemaVersion).toBe(5);
-    expect(result.bookmarks["b1"].name).toBe("Example");
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(result.bookmarks["b1"].folderId).toBe("root");
+    expect(result.folders["inbox"]).toBeUndefined();
+    expect(result.inboxFolderId).toBeUndefined();
   });
 
   it("future version (v99) → returned as-is, no downgrade", () => {
@@ -84,7 +86,10 @@ describe("migrateState", () => {
       schemaVersion: 0,
       rootFolderId: "root",
       inboxFolderId: "inbox",
-      folders: baseState.folders,
+      folders: {
+        root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
+        inbox: { id: "inbox", parentId: "root", name: "Inbox", sortKey: "a", createdAt: 1000, updatedAt: 1000 },
+      },
       bookmarks: {
         b1: { id: "b1", folderId: "inbox", type: "SNIPPET", name: "Snippet", url: "https://example.com", domain: "example.com", sortKey: "1", createdAt: 2000, updatedAt: 2000, snippet: { text: "hello" } },
       },
@@ -93,7 +98,9 @@ describe("migrateState", () => {
     expect(result.schemaVersion).toBe(SCHEMA_VERSION);
     expect(result.bookmarks["b1"].url).toBe("https://example.com");
     expect(result.bookmarks["b1"].snippet?.text).toBe("hello");
+    expect(result.bookmarks["b1"].folderId).toBe("root");
     expect(result.folders["root"].name).toBe("ZeroPin");
+    expect(result.folders["inbox"]).toBeUndefined();
   });
 
   it("idempotent — running twice produces same result", () => {

@@ -31,6 +31,7 @@ import {
   buildYouTubeOpenUrl,
 } from "./core/youtube";
 import type { YouTubeCaptureResult } from "./core/youtube";
+import { getPrefs, type Prefs } from "./core/storage/prefs";
 
 interface SnippetAnchor {
   text: string;
@@ -67,7 +68,7 @@ interface SnippetAnchor {
 const FUZZY_SIMILARITY_MIN = 0.5;
 const PREFIX_SUFFIX_LENGTH = 50;
 const FINGERPRINT_FRAG_LENGTH = 30;
-const HIGHLIGHT_DURATION_MS = 3000;
+let highlightDurationMs = 3000;
 const MUTATION_DEBOUNCE_MS = 200;
 const INITIAL_DELAY_MS = 100;
 
@@ -757,7 +758,20 @@ function showLowConfidenceNotice(): void {
 
 // ── Floating snippet card for AI chat pages ──
 
-const SNIPPET_CARD_DURATION_MS = 12000;
+let snippetDismissMs = 12000;
+
+// Load user prefs and keep in sync with storage changes
+getPrefs().then((p: Prefs) => {
+  highlightDurationMs = p.highlightDurationMs;
+  snippetDismissMs = p.snippetDismissMs;
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes["zp_prefs"]) {
+    const p = changes["zp_prefs"].newValue as Prefs;
+    highlightDurationMs = p.highlightDurationMs;
+    snippetDismissMs = p.snippetDismissMs;
+  }
+});
 const SNIPPET_CARD_MAX_LENGTH = 400;
 
 const CARD_THEMES = {
@@ -936,7 +950,7 @@ async function showSnippetCard(anchor: SnippetAnchor): Promise<void> {
       card.style.opacity = "0";
       setTimeout(() => card.remove(), 300);
     }
-  }, SNIPPET_CARD_DURATION_MS);
+  }, snippetDismissMs);
 }
 
 // ── Highlight and scroll ──
@@ -987,7 +1001,7 @@ function highlightAndScroll(result: HighlightResult): void {
         }
         mark.parentNode.removeChild(mark);
       }
-    }, HIGHLIGHT_DURATION_MS);
+    }, highlightDurationMs);
   } catch (err) {
     console.error("ZP: highlightAndScroll error", err);
   }

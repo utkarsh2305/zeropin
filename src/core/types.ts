@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 7 as const;
+export const SCHEMA_VERSION = 8 as const;
 
 /** Optional media metadata attached to a bookmark. Currently only "youtube". */
 export interface BookmarkMedia {
@@ -17,6 +17,15 @@ export interface BookmarkMedia {
 
 export type FolderId = string;
 export type BookmarkId = string;
+export type TagId = string;
+
+export interface TagDef {
+  id: TagId;
+  name: string;
+  color?: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export type BookmarkType = "PAGE" | "SNIPPET";
 
@@ -40,6 +49,7 @@ export interface Bookmark {
   sortKey: string;
   createdAt: number;
   updatedAt: number;
+  tags?: TagId[];
   notes?: string;
   snippetHash?: string;
   openCount?: number;
@@ -92,5 +102,6 @@ export interface LibraryState {
   inboxFolderId?: FolderId;
   folders: Record<FolderId, Folder>;
   bookmarks: Record<BookmarkId, Bookmark>;
+  tagDefs?: Record<TagId, TagDef>;
   lastUsedFolderId?: FolderId;
 }

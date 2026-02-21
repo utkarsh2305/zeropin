@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { getState, recordBookmarkOpen } from "./core/storage/local";
+import { getState, recordBookmarkOpen, setLastUsedFolder } from "./core/storage/local";
 import { ThemeContext, useDarkMode } from "./app/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search } from "lucide-react";
 import { BrandIcon } from "./app/BrandIcon";
 import type { Bookmark, LibraryState } from "./core/types";
@@ -70,6 +71,10 @@ function Popup() {
     ? state.folders[state.lastUsedFolderId ?? ""] ??
       state.folders[state.rootFolderId]
     : null;
+
+  const sortedFolders = state
+    ? Object.values(state.folders).sort((a, b) => Number(a.sortKey) - Number(b.sortKey))
+    : [];
 
   const openPin = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
@@ -174,16 +179,31 @@ function Popup() {
             </div>
           </div>
 
-          {/* Current Folder shortcut */}
-          <button
-            onClick={openCurrentFolder}
-            className="flex items-center gap-2 w-full px-4 py-2 text-left text-sm hover:bg-accent/50 transition-colors border-b border-border"
-          >
+          {/* Current Folder switcher */}
+          <div className="flex items-center gap-1.5 w-full px-3 py-1.5 border-b border-border">
             <Folder size={14} className="text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground">Current Folder:</span>
-            <span className="font-medium truncate">{currentFolder?.name ?? "Library"}</span>
-            <ExternalLink size={12} className="ml-auto text-muted-foreground shrink-0 opacity-50" />
-          </button>
+            <span className="text-muted-foreground text-sm shrink-0">Folder:</span>
+            <Select
+              value={currentFolder?.id ?? ""}
+              onValueChange={async (id) => { try { await setLastUsedFolder(id); } catch {} }}
+            >
+              <SelectTrigger className="h-7 text-sm flex-1 border-none shadow-none px-1 focus:ring-0 focus:ring-offset-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sortedFolders.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <button
+              onClick={openCurrentFolder}
+              className="text-muted-foreground opacity-50 hover:opacity-100 transition-opacity shrink-0 p-0.5"
+              title="Open folder in Library"
+            >
+              <ExternalLink size={12} />
+            </button>
+          </div>
 
           {/* Pin list */}
           <div className="px-3 py-2">
@@ -222,6 +242,11 @@ function Popup() {
                         <span>{relativeTime(b.createdAt)}</span>
                         <span className="truncate">{b.domain}</span>
                       </div>
+                      {b.notes && b.notes.trim() && (
+                        <div className="text-[10px] text-muted-foreground mt-0.5 truncate italic">
+                          {b.notes.length > 60 ? b.notes.slice(0, 60) + "…" : b.notes}
+                        </div>
+                      )}
                     </div>
                   </button>
                 ))}

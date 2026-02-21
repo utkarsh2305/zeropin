@@ -7,7 +7,7 @@
  * We test the pure logic that Library.tsx uses, not the React components themselves.
  */
 import { describe, it, expect } from "vitest";
-import type { Bookmark } from "../../core/types";
+import type { Bookmark, Folder, TagDef } from "../../core/types";
 
 // ── Helper: create test bookmark ──
 
@@ -48,6 +48,12 @@ function filterByFolder(bookmarks: Bookmark[], folderId: string, isSearching: bo
 
 function getRecentPins(bookmarks: Bookmark[], limit = 10): Bookmark[] {
   return [...bookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+}
+
+// ── Helper: create test folder ──
+
+function makeFolder(id: string, name: string, sortKey: string): Folder {
+  return { id, parentId: null, name, sortKey, createdAt: 0, updatedAt: 0 };
 }
 
 // ── Global Search ──
@@ -144,6 +150,152 @@ describe("Recently pinned logic", () => {
   });
 });
 
+// ── Note Truncation (#5) ──
+
+function truncateNote(notes?: string): string | null {
+  if (!notes || !notes.trim()) return null;
+  return notes.length > 60 ? notes.slice(0, 60) + "…" : notes;
+}
+
+describe("truncateNote", () => {
+  it("returns null for undefined", () => {
+    expect(truncateNote(undefined)).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(truncateNote("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(truncateNote("   ")).toBeNull();
+  });
+
+  it("passes through a short note unchanged", () => {
+    expect(truncateNote("Short note")).toBe("Short note");
+  });
+
+  it("passes through a 60-char note unchanged", () => {
+    const note = "a".repeat(60);
+    expect(truncateNote(note)).toBe(note);
+  });
+
+  it("truncates a 61-char note to 60 chars + ellipsis", () => {
+    const note = "a".repeat(61);
+    expect(truncateNote(note)).toBe("a".repeat(60) + "…");
+  });
+});
+
+// ── Sort Options (#1) ──
+
+// Mirrors Library.tsx sortBookmarks
+type SortKey = "newest" | "oldest" | "name_asc" | "name_desc" | "last_opened" | "most_opened";
+function sortBookmarks(bookmarks: Bookmark[], sortBy: SortKey): Bookmark[] {
+  return [...bookmarks].sort((a, b) => {
+    switch (sortBy) {
+      case "oldest":      return Number(a.sortKey) - Number(b.sortKey);
+      case "name_asc":    return a.name.localeCompare(b.name);
+      case "name_desc":   return b.name.localeCompare(a.name);
+      case "last_opened": return (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0);
+      case "most_opened": return (b.openCount ?? 0) - (a.openCount ?? 0);
+      default:            return Number(b.sortKey) - Number(a.sortKey); // newest
+    }
+  });
+}
+
+describe("sortBookmarks", () => {
+  const base = {
+    folderId: "root",
+    type: "PAGE" as const,
+    url: "https://example.com",
+    domain: "example.com",
+    createdAt: 1000,
+    updatedAt: 1000,
+  };
+
+  const bookmarks: Bookmark[] = [
+    { ...base, id: "a", name: "Zebra", sortKey: "1000", openCount: 5, lastOpenedAt: 3000 },
+    { ...base, id: "b", name: "Apple", sortKey: "2000", openCount: 0, lastOpenedAt: 0 },
+    { ...base, id: "c", name: "Mango", sortKey: "3000", openCount: 10, lastOpenedAt: 1000 },
+  ];
+
+  it("newest — descending sortKey (c, b, a)", () => {
+    const result = sortBookmarks(bookmarks, "newest");
+    expect(result.map((x) => x.id)).toEqual(["c", "b", "a"]);
+  });
+
+  it("oldest — ascending sortKey (a, b, c)", () => {
+    const result = sortBookmarks(bookmarks, "oldest");
+    expect(result.map((x) => x.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("name_asc — alphabetical (Apple, Mango, Zebra)", () => {
+    const result = sortBookmarks(bookmarks, "name_asc");
+    expect(result.map((x) => x.id)).toEqual(["b", "c", "a"]);
+  });
+
+  it("name_desc — reverse alphabetical (Zebra, Mango, Apple)", () => {
+    const result = sortBookmarks(bookmarks, "name_desc");
+    expect(result.map((x) => x.id)).toEqual(["a", "c", "b"]);
+  });
+
+  it("last_opened — descending lastOpenedAt (a=3000, c=1000, b=0)", () => {
+    const result = sortBookmarks(bookmarks, "last_opened");
+    expect(result.map((x) => x.id)).toEqual(["a", "c", "b"]);
+  });
+
+  it("most_opened — descending openCount (c=10, a=5, b=0)", () => {
+    const result = sortBookmarks(bookmarks, "most_opened");
+    expect(result.map((x) => x.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("ties in last_opened (both 0) do not throw", () => {
+    const tied: Bookmark[] = [
+      { ...base, id: "x", name: "X", sortKey: "1" },
+      { ...base, id: "y", name: "Y", sortKey: "2" },
+    ];
+    expect(() => sortBookmarks(tied, "last_opened")).not.toThrow();
+  });
+
+  it("ties in most_opened (both 0) do not throw", () => {
+    const tied: Bookmark[] = [
+      { ...base, id: "x", name: "X", sortKey: "1" },
+      { ...base, id: "y", name: "Y", sortKey: "2" },
+    ];
+    expect(() => sortBookmarks(tied, "most_opened")).not.toThrow();
+  });
+
+  it("does not mutate the original array", () => {
+    const original = [...bookmarks];
+    sortBookmarks(bookmarks, "name_asc");
+    expect(bookmarks.map((x) => x.id)).toEqual(original.map((x) => x.id));
+  });
+});
+
+// ── Open Count Display (#3) ──
+
+function formatOpenCount(openCount?: number): string | null {
+  if ((openCount ?? 0) <= 0) return null;
+  return `Opened ${openCount}×`;
+}
+
+describe("formatOpenCount", () => {
+  it("returns null for undefined", () => {
+    expect(formatOpenCount(undefined)).toBeNull();
+  });
+
+  it("returns null for 0", () => {
+    expect(formatOpenCount(0)).toBeNull();
+  });
+
+  it("returns formatted string for 1", () => {
+    expect(formatOpenCount(1)).toBe("Opened 1×");
+  });
+
+  it("returns formatted string for 100", () => {
+    expect(formatOpenCount(100)).toBe("Opened 100×");
+  });
+});
+
 // ── Bulk Selection ──
 
 describe("Bulk selection logic", () => {
@@ -194,5 +346,204 @@ describe("Bulk selection logic", () => {
     selectedIds = new Set();
     expect(bulkMode).toBe(false);
     expect(selectedIds.size).toBe(0);
+  });
+});
+
+// ── Popup folder switcher (#8) ──
+
+function sortFoldersForDisplay(folders: Record<string, Folder>): Folder[] {
+  return Object.values(folders).sort((a, b) => Number(a.sortKey) - Number(b.sortKey));
+}
+
+describe("sortFoldersForDisplay", () => {
+  it("returns folders sorted by sortKey ascending", () => {
+    const folders: Record<string, Folder> = {
+      c: makeFolder("c", "Charlie", "3000"),
+      a: makeFolder("a", "Alpha",   "1000"),
+      b: makeFolder("b", "Beta",    "2000"),
+    };
+    const result = sortFoldersForDisplay(folders);
+    expect(result.map((f) => f.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(sortFoldersForDisplay({})).toEqual([]);
+  });
+
+  it("does not mutate the original object", () => {
+    const folders: Record<string, Folder> = {
+      b: makeFolder("b", "Beta",  "2000"),
+      a: makeFolder("a", "Alpha", "1000"),
+    };
+    const keysBefore = Object.keys(folders);
+    sortFoldersForDisplay(folders);
+    expect(Object.keys(folders)).toEqual(keysBefore);
+  });
+
+  it("single folder returns that folder", () => {
+    const folders: Record<string, Folder> = {
+      x: makeFolder("x", "Only", "500"),
+    };
+    const result = sortFoldersForDisplay(folders);
+    expect(result.length).toBe(1);
+    expect(result[0].id).toBe("x");
+  });
+});
+
+// ── Keyboard navigation (#6) ──
+
+function getAdjacentId(ids: string[], currentId: string | null, delta: 1 | -1): string | null {
+  if (ids.length === 0) return null;
+  if (!currentId) return delta === 1 ? ids[0] : ids[ids.length - 1];
+  const idx = ids.indexOf(currentId);
+  if (idx === -1) return ids[0];
+  const next = idx + delta;
+  if (next < 0 || next >= ids.length) return currentId;
+  return ids[next];
+}
+
+describe("getAdjacentId", () => {
+  const ids = ["a", "b", "c", "d"];
+
+  it("empty list returns null", () => {
+    expect(getAdjacentId([], null, 1)).toBeNull();
+    expect(getAdjacentId([], "a", -1)).toBeNull();
+  });
+
+  it("null currentId + delta=1 returns first item", () => {
+    expect(getAdjacentId(ids, null, 1)).toBe("a");
+  });
+
+  it("null currentId + delta=-1 returns last item", () => {
+    expect(getAdjacentId(ids, null, -1)).toBe("d");
+  });
+
+  it("moves forward by one", () => {
+    expect(getAdjacentId(ids, "a", 1)).toBe("b");
+    expect(getAdjacentId(ids, "b", 1)).toBe("c");
+  });
+
+  it("moves backward by one", () => {
+    expect(getAdjacentId(ids, "d", -1)).toBe("c");
+    expect(getAdjacentId(ids, "b", -1)).toBe("a");
+  });
+
+  it("clamps at the start (delta=-1 on first item stays on first)", () => {
+    expect(getAdjacentId(ids, "a", -1)).toBe("a");
+  });
+
+  it("clamps at the end (delta=1 on last item stays on last)", () => {
+    expect(getAdjacentId(ids, "d", 1)).toBe("d");
+  });
+
+  it("unknown currentId returns first item", () => {
+    expect(getAdjacentId(ids, "z", 1)).toBe("a");
+  });
+
+  it("single-item list returns that item for both directions", () => {
+    expect(getAdjacentId(["x"], "x", 1)).toBe("x");
+    expect(getAdjacentId(["x"], "x", -1)).toBe("x");
+  });
+});
+
+// ── Tag filtering / sorting logic (#tag-system) ──
+
+function makeTagDef(overrides: Partial<TagDef> & { id: string; name: string }): TagDef {
+  return {
+    createdAt: 1000,
+    updatedAt: 1000,
+    ...overrides,
+  };
+}
+
+function filterByTag(bookmarks: Bookmark[], tagId: string): Bookmark[] {
+  return bookmarks.filter((b) => (b.tags ?? []).includes(tagId));
+}
+
+function getAllTagsSorted(tagDefs: Record<string, TagDef>): TagDef[] {
+  return Object.values(tagDefs).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getTagCount(bookmarks: Bookmark[], tagId: string): number {
+  return bookmarks.filter((b) => (b.tags ?? []).includes(tagId)).length;
+}
+
+describe("filterByTag", () => {
+  const b1 = makeBookmark({ id: "b1", tags: ["t1", "t2"] });
+  const b2 = makeBookmark({ id: "b2", tags: ["t2"] });
+  const b3 = makeBookmark({ id: "b3" }); // no tags field
+  const b4 = makeBookmark({ id: "b4", tags: [] });
+
+  it("returns only bookmarks containing the given tagId", () => {
+    const result = filterByTag([b1, b2, b3, b4], "t1");
+    expect(result.map((b) => b.id)).toEqual(["b1"]);
+  });
+
+  it("returns multiple bookmarks when they share a tag", () => {
+    const result = filterByTag([b1, b2, b3, b4], "t2");
+    expect(result.map((b) => b.id)).toEqual(["b1", "b2"]);
+  });
+
+  it("returns empty array when no bookmark has the tag", () => {
+    expect(filterByTag([b1, b2, b3, b4], "t99")).toEqual([]);
+  });
+
+  it("returns empty array when given unknown tagId", () => {
+    expect(filterByTag([b3, b4], "t1")).toEqual([]);
+  });
+
+  it("treats missing tags field as empty array", () => {
+    const result = filterByTag([b3], "t1");
+    expect(result).toEqual([]);
+  });
+});
+
+describe("getAllTagsSorted", () => {
+  const tagDefs: Record<string, TagDef> = {
+    t3: makeTagDef({ id: "t3", name: "zebra" }),
+    t1: makeTagDef({ id: "t1", name: "apple" }),
+    t2: makeTagDef({ id: "t2", name: "mango" }),
+  };
+
+  it("returns tags sorted alphabetically by name", () => {
+    const sorted = getAllTagsSorted(tagDefs);
+    expect(sorted.map((t) => t.name)).toEqual(["apple", "mango", "zebra"]);
+  });
+
+  it("returns empty array for empty tagDefs", () => {
+    expect(getAllTagsSorted({})).toEqual([]);
+  });
+
+  it("returns single-element array unchanged", () => {
+    const result = getAllTagsSorted({ t1: makeTagDef({ id: "t1", name: "solo" }) });
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe("solo");
+  });
+});
+
+describe("getTagCount", () => {
+  const b1 = makeBookmark({ id: "b1", tags: ["t1", "t2"] });
+  const b2 = makeBookmark({ id: "b2", tags: ["t1"] });
+  const b3 = makeBookmark({ id: "b3" });
+
+  it("counts bookmarks that contain the tag", () => {
+    expect(getTagCount([b1, b2, b3], "t1")).toBe(2);
+  });
+
+  it("counts only bookmarks with that specific tag", () => {
+    expect(getTagCount([b1, b2, b3], "t2")).toBe(1);
+  });
+
+  it("returns 0 when no bookmarks have the tag", () => {
+    expect(getTagCount([b1, b2, b3], "t99")).toBe(0);
+  });
+
+  it("returns 0 for empty bookmarks list", () => {
+    expect(getTagCount([], "t1")).toBe(0);
+  });
+
+  it("correctly counts bookmark with multiple tags", () => {
+    const multi = makeBookmark({ id: "m", tags: ["t1", "t2", "t3"] });
+    expect(getTagCount([multi], "t2")).toBe(1);
   });
 });

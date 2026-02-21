@@ -83,6 +83,15 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 7;
     return state;
   },
+  // v7 → v8: add tags array to bookmarks and tagDefs map to state
+  7: (state) => {
+    for (const b of Object.values(state.bookmarks) as any[]) {
+      if (!Array.isArray(b.tags)) b.tags = [];
+    }
+    if (!state.tagDefs) state.tagDefs = {};
+    state.schemaVersion = 8;
+    return state;
+  },
 };
 
 /**

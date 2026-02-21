@@ -440,6 +440,55 @@ export async function setLastUsedFolder(folderId: string): Promise<void> {
   await setState(state);
 }
 
+export async function createTag(name: string, color?: string): Promise<string> {
+  const state = await getState();
+  const id = crypto.randomUUID();
+  const ts = now();
+  if (!state.tagDefs) state.tagDefs = {};
+  state.tagDefs[id] = { id, name, color, createdAt: ts, updatedAt: ts };
+  await setState(state);
+  return id;
+}
+
+export async function renameTag(tagId: string, name: string): Promise<void> {
+  const state = await getState();
+  const tag = state.tagDefs?.[tagId];
+  if (!tag) throw new Error(`Tag ${tagId} not found`);
+  tag.name = name;
+  tag.updatedAt = now();
+  await setState(state);
+}
+
+export async function deleteTag(tagId: string): Promise<void> {
+  const state = await getState();
+  if (!state.tagDefs?.[tagId]) throw new Error(`Tag ${tagId} not found`);
+  delete state.tagDefs[tagId];
+  for (const b of Object.values(state.bookmarks)) {
+    if (Array.isArray(b.tags)) {
+      b.tags = b.tags.filter((t) => t !== tagId);
+    }
+  }
+  await setState(state);
+}
+
+export async function setTagColor(tagId: string, color: string | undefined): Promise<void> {
+  const state = await getState();
+  const tag = state.tagDefs?.[tagId];
+  if (!tag) throw new Error(`Tag ${tagId} not found`);
+  tag.color = color;
+  tag.updatedAt = now();
+  await setState(state);
+}
+
+export async function setBookmarkTags(bookmarkId: string, tagIds: string[]): Promise<void> {
+  const state = await getState();
+  const bookmark = state.bookmarks[bookmarkId];
+  if (!bookmark) throw new Error(`Bookmark ${bookmarkId} not found`);
+  bookmark.tags = tagIds;
+  bookmark.updatedAt = now();
+  await setState(state);
+}
+
 export async function recordBookmarkOpen(id: string): Promise<void> {
   const state = await getState();
   const b = state.bookmarks[id];
@@ -497,6 +546,21 @@ export async function repairBookmarkAnchor(
   bookmark.updatedAt = updates.repairedAt;
 
   await setState(state);
+}
+
+/**
+ * Returns the name of the folder where `url` is already pinned,
+ * provided it's in a DIFFERENT folder than `targetFolderId`.
+ * Returns null if not found or if the existing bookmark is already in the target folder
+ * (same-folder dedup is handled silently by addPageBookmark / addSelectionBookmark).
+ */
+export async function getDuplicateFolderName(url: string, targetFolderId: string): Promise<string | null> {
+  const state = await getState();
+  const hash = computeSnippetHash(url);
+  const existing = Object.values(state.bookmarks).find((b) => b.snippetHash === hash);
+  if (!existing) return null;
+  if (existing.folderId === targetFolderId) return null;
+  return state.folders[existing.folderId]?.name ?? null;
 }
 
 export async function bulkDeleteBookmarks(ids: string[]): Promise<void> {

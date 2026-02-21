@@ -142,4 +142,39 @@ describe("migrateState", () => {
     const second = migrateState({ ...first });
     expect(second).toEqual(first);
   });
+
+  it("v7 state → bookmarks get tags:[], state gets tagDefs:{}", () => {
+    const raw = {
+      schemaVersion: 7,
+      rootFolderId: "root",
+      folders: {
+        root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
+      },
+      bookmarks: {
+        b1: { id: "b1", folderId: "root", type: "PAGE", name: "Example", url: "https://example.com", domain: "example.com", sortKey: "1", createdAt: 1000, updatedAt: 1000 },
+        b2: { id: "b2", folderId: "root", type: "PAGE", name: "Other", url: "https://other.com", domain: "other.com", sortKey: "2", createdAt: 1000, updatedAt: 1000 },
+      },
+    };
+    const result = migrateState(raw);
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
+    for (const b of Object.values(result.bookmarks)) {
+      expect((b as any).tags).toEqual([]);
+    }
+    expect((result as any).tagDefs).toEqual({});
+  });
+
+  it("v7 state → existing tags array is preserved (idempotent)", () => {
+    const raw = {
+      schemaVersion: 7,
+      rootFolderId: "root",
+      folders: {
+        root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
+      },
+      bookmarks: {
+        b1: { id: "b1", folderId: "root", type: "PAGE", name: "Example", url: "https://example.com", domain: "example.com", sortKey: "1", createdAt: 1000, updatedAt: 1000, tags: ["tag1"] },
+      },
+    };
+    const result = migrateState(raw);
+    expect((result.bookmarks["b1"] as any).tags).toEqual(["tag1"]);
+  });
 });

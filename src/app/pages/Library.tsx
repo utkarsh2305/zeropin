@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark } from "../../core/storage/local";
+import { getPrefs, setPrefs, type Prefs } from "../../core/storage/prefs";
+import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags } from "../../core/storage/local";
 import { getPendingSave, setPendingSave, updateRecents } from "../../core/storage/recents";
 import type { PendingSave } from "../../core/storage/recents";
 import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
 import type { BrowserImportPreview } from "../../core/storage/importBrowser";
-import type { LibraryState, Bookmark, Folder } from "../../core/types";
+import type { LibraryState, Bookmark, Folder, TagDef } from "../../core/types";
 import { useTheme } from "../theme";
 import { useToast } from "../Toast";
 import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
@@ -21,7 +22,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -340,6 +341,11 @@ function SortableBookmarkItem({
   bulkMode,
   selected,
   onToggleSelect,
+  isFocused,
+  onFocusCard,
+  tagDefs,
+  isDark,
+  onToggleTags,
 }: {
   bookmark: Bookmark;
   onOpen: () => void;
@@ -354,6 +360,11 @@ function SortableBookmarkItem({
   bulkMode?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
+  isFocused?: boolean;
+  onFocusCard?: () => void;
+  tagDefs?: Record<string, TagDef>;
+  isDark?: boolean;
+  onToggleTags?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
@@ -399,11 +410,14 @@ function SortableBookmarkItem({
   return (
     <div
       ref={ref}
+      tabIndex={0}
+      onFocus={onFocusCard}
       className={cn(
-        "group/card relative rounded-lg border p-3 transition-all",
+        "group/card relative rounded-lg border p-3 transition-all outline-none",
         isSnippet ? "border-l-2 border-l-snippet" : "border-border/50",
         selected && "border-info ring-1 ring-info/30",
         !selected && !isSnippet && "hover:border-border hover:shadow-sm",
+        isFocused && "ring-2 ring-primary",
       )}
       style={{ opacity: isDragging ? 0.4 : 1 }}
     >
@@ -481,6 +495,9 @@ function SortableBookmarkItem({
           <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
             <span>{bookmark.domain}</span>
             <span>{relativeTime(bookmark.createdAt)}</span>
+            {(bookmark.openCount ?? 0) > 0 && (
+              <span>Opened {bookmark.openCount}×</span>
+            )}
             {folderName && (
               <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
                 {folderName}
@@ -493,6 +510,33 @@ function SortableBookmarkItem({
               &ldquo;{snippetPreview}&rdquo;
             </p>
           )}
+          {bookmark.notes && bookmark.notes.trim() && (
+            <p className="text-xs text-muted-foreground mt-1 italic truncate">
+              {bookmark.notes.length > 60 ? bookmark.notes.slice(0, 60) + "…" : bookmark.notes}
+            </p>
+          )}
+          {(bookmark.tags ?? []).length > 0 && tagDefs && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {(bookmark.tags ?? []).slice(0, 3).map((tagId) => {
+                const tag = tagDefs[tagId];
+                if (!tag) return null;
+                const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                return (
+                  <span
+                    key={tagId}
+                    className="inline-flex items-center text-[10px] px-1.5 py-0 rounded-full border font-normal"
+                    style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : undefined}
+                  >
+                    #{tag.name}
+                  </span>
+                );
+              })}
+              {(bookmark.tags ?? []).length > 3 && (
+                <span className="text-[10px] text-muted-foreground">+{bookmark.tags!.length - 3}</span>
+              )}
+            </div>
+          )}
         </div>
 
         <DropdownMenu>
@@ -504,6 +548,7 @@ function SortableBookmarkItem({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleNote}>Notes</DropdownMenuItem>
+            <DropdownMenuItem onClick={onToggleTags}>Tags</DropdownMenuItem>
             <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -670,7 +715,155 @@ function getDescendantFolderIds(
   return result;
 }
 
+/* ─── TagEditor ─────────────────────────────────────────────────── */
+
+function TagEditor({
+  currentTagIds,
+  tagDefs,
+  isDark,
+  onSave,
+  onClose,
+}: {
+  currentTagIds: string[];
+  tagDefs: Record<string, TagDef>;
+  isDark?: boolean;
+  onSave: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const [input, setInput] = useState("");
+  const [ids, setIds] = useState<string[]>(currentTagIds);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const query = input.trim().toLowerCase();
+  const allTags = Object.values(tagDefs).sort((a, b) => a.name.localeCompare(b.name));
+  const suggestions = query
+    ? allTags.filter((t) => t.name.toLowerCase().includes(query) && !ids.includes(t.id))
+    : allTags.filter((t) => !ids.includes(t.id));
+  const exactMatch = allTags.find((t) => t.name.toLowerCase() === query);
+
+  const addTag = (tagId: string) => {
+    if (!ids.includes(tagId)) {
+      const next = [...ids, tagId];
+      setIds(next);
+      onSave(next);
+    }
+    setInput("");
+    inputRef.current?.focus();
+  };
+
+  const removeTag = (tagId: string) => {
+    const next = ids.filter((t) => t !== tagId);
+    setIds(next);
+    onSave(next);
+  };
+
+  const handleKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+    if (e.key === "Enter" && query) {
+      e.preventDefault();
+      if (exactMatch) {
+        addTag(exactMatch.id);
+      } else {
+        const newId = await createTag(query);
+        addTag(newId);
+      }
+    }
+    if (e.key === "Backspace" && !input && ids.length > 0) {
+      removeTag(ids[ids.length - 1]);
+    }
+  };
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  return (
+    <div className="mt-2 p-2 bg-muted rounded-md space-y-2" onClick={(e) => e.stopPropagation()}>
+      <div className="flex flex-wrap gap-1 items-center min-h-6">
+        {ids.map((tagId) => {
+          const tag = tagDefs[tagId];
+          if (!tag) return null;
+          return (
+            <span key={tagId} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+              #{tag.name}
+              <button onClick={() => removeTag(tagId)} className="hover:text-destructive ml-0.5 leading-none">&times;</button>
+            </span>
+          );
+        })}
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={ids.length === 0 ? "Type a tag name…" : "Add another…"}
+          className="flex-1 min-w-20 bg-transparent border-none outline-none text-xs text-foreground placeholder:text-muted-foreground"
+        />
+      </div>
+      {(suggestions.length > 0 || (query && !exactMatch)) && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {suggestions.map((tag) => {
+            const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+            const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+            return (
+              <button
+                key={tag.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); addTag(tag.id); }}
+                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors hover:bg-accent"
+                style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : undefined}
+              >
+                + #{tag.name}
+              </button>
+            );
+          })}
+          {query && !exactMatch && (
+            <button
+              type="button"
+              onMouseDown={async (e) => { e.preventDefault(); const id = await createTag(query); addTag(id); }}
+              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-dashed border-primary/50 text-primary hover:bg-primary/10 transition-colors"
+            >
+              + Create &ldquo;{query}&rdquo;
+            </button>
+          )}
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button size="sm" variant="ghost" onClick={onClose} className="h-6 text-xs px-2">Done</Button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── BookmarkList ──────────────────────────────────────────────── */
+
+export type SortKey = "newest" | "oldest" | "name_asc" | "name_desc" | "last_opened" | "most_opened";
+
+export function sortBookmarks(bookmarks: Bookmark[], sortBy: SortKey): Bookmark[] {
+  return [...bookmarks].sort((a, b) => {
+    switch (sortBy) {
+      case "oldest":      return Number(a.sortKey) - Number(b.sortKey);
+      case "name_asc":    return a.name.localeCompare(b.name);
+      case "name_desc":   return b.name.localeCompare(a.name);
+      case "last_opened": return (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0);
+      case "most_opened": return (b.openCount ?? 0) - (a.openCount ?? 0);
+      default:            return Number(b.sortKey) - Number(a.sortKey); // newest
+    }
+  });
+}
+
+// ── Keyboard nav helper ────────────────────────────────────────────
+
+export function getAdjacentId(
+  ids: string[],
+  currentId: string | null,
+  delta: 1 | -1,
+): string | null {
+  if (ids.length === 0) return null;
+  if (!currentId) return delta === 1 ? ids[0] : ids[ids.length - 1];
+  const idx = ids.indexOf(currentId);
+  if (idx === -1) return ids[0];
+  const next = idx + delta;
+  if (next < 0 || next >= ids.length) return currentId; // clamp at edges
+  return ids[next];
+}
 
 type BookmarkListProps = {
   bookmarks: Bookmark[];
@@ -686,16 +879,49 @@ type BookmarkListProps = {
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
+  sortBy: SortKey;
+  tagDefs: Record<string, TagDef>;
+  onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
+  isDark?: boolean;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
 
   const activeIds = isSearching ? null : getDescendantFolderIds(activeFolderId, folders);
 
-  const filtered = bookmarks
-    .filter((b) => isSearching || activeIds!.has(b.folderId))
-    .sort((a, b) => Number(b.sortKey) - Number(a.sortKey));
+  const filtered = sortBookmarks(
+    bookmarks.filter((b) => isSearching || activeIds!.has(b.folderId)),
+    sortBy,
+  );
+
+  const visibleIds = filtered.map((b) => b.id);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedId(getAdjacentId(visibleIds, focusedId, e.key === "ArrowDown" ? 1 : -1));
+    }
+    if (e.key === "Enter" && focusedId) {
+      const b = filtered.find((x) => x.id === focusedId);
+      if (b) handleOpenBookmark(b);
+    }
+    if ((e.key === "Delete" || e.key === "Backspace") && focusedId) {
+      e.preventDefault();
+      onDeleteBookmark(focusedId);
+    }
+    if ((e.key === "e" || e.key === "E") && focusedId) {
+      const b = filtered.find((x) => x.id === focusedId);
+      if (b) onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(focusedId, name));
+    }
+    if (e.key === "Escape") {
+      setFocusedId(null);
+    }
+  };
 
   const handleOpenBookmark = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
@@ -730,34 +956,49 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
   };
 
   const renderBookmarkItem = (b: Bookmark, folderName?: string) => (
-    <SortableBookmarkItem
-      key={b.id}
-      bookmark={b}
-      onOpen={() => handleOpenBookmark(b)}
-      onRename={() => {
-        onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(b.id, name));
-      }}
-      onDelete={() => onDeleteBookmark(b.id)}
-      folderName={folderName}
-      bulkMode={bulkMode}
-      selected={selectedIds.has(b.id)}
-      onToggleSelect={() => onToggleSelect(b.id)}
-      expandedNote={expandedNotes[b.id]}
-      onToggleNote={() => {
-        const s = expandedNotes[b.id] ?? { open: false, draft: "" };
-        onSetExpandedNotes({
-          ...expandedNotes,
-          [b.id]: { ...s, open: !s.open, draft: s.draft || b.notes || "" },
-        });
-      }}
-      onNoteChange={(draft) => {
-        onSetExpandedNotes({ ...expandedNotes, [b.id]: { open: true, draft } });
-      }}
-      onSaveNote={() => onSetNotes(b.id, expandedNotes[b.id]?.draft || "")}
-      onCancelNote={() => {
-        onSetExpandedNotes({ ...expandedNotes, [b.id]: { open: false, draft: "" } });
-      }}
-    />
+    <div key={b.id}>
+      <SortableBookmarkItem
+        bookmark={b}
+        onOpen={() => handleOpenBookmark(b)}
+        onRename={() => {
+          onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(b.id, name));
+        }}
+        onDelete={() => onDeleteBookmark(b.id)}
+        folderName={folderName}
+        bulkMode={bulkMode}
+        selected={selectedIds.has(b.id)}
+        onToggleSelect={() => onToggleSelect(b.id)}
+        expandedNote={expandedNotes[b.id]}
+        onToggleNote={() => {
+          const s = expandedNotes[b.id] ?? { open: false, draft: "" };
+          onSetExpandedNotes({
+            ...expandedNotes,
+            [b.id]: { ...s, open: !s.open, draft: s.draft || b.notes || "" },
+          });
+        }}
+        onNoteChange={(draft) => {
+          onSetExpandedNotes({ ...expandedNotes, [b.id]: { open: true, draft } });
+        }}
+        onSaveNote={() => onSetNotes(b.id, expandedNotes[b.id]?.draft || "")}
+        onCancelNote={() => {
+          onSetExpandedNotes({ ...expandedNotes, [b.id]: { open: false, draft: "" } });
+        }}
+        isFocused={focusedId === b.id}
+        onFocusCard={() => setFocusedId(b.id)}
+        tagDefs={tagDefs}
+        isDark={isDark}
+        onToggleTags={() => setExpandedTags((prev) => ({ ...prev, [b.id]: !prev[b.id] }))}
+      />
+      {expandedTags[b.id] && (
+        <TagEditor
+          currentTagIds={b.tags ?? []}
+          tagDefs={tagDefs}
+          isDark={isDark}
+          onSave={(ids) => onSetBookmarkTags(b.id, ids)}
+          onClose={() => setExpandedTags((prev) => ({ ...prev, [b.id]: false }))}
+        />
+      )}
+    </div>
   );
 
   if (filtered.length === 0) {
@@ -775,7 +1016,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
   if (isSearching) {
     return (
-      <div>
+      <div onKeyDown={handleKeyDown}>
         <h3 className="mt-0 text-base font-semibold tracking-tight text-foreground">
           Search results ({filtered.length})
         </h3>
@@ -789,7 +1030,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
   const groups = groupByUrl(filtered);
 
   return (
-    <div>
+    <div onKeyDown={handleKeyDown}>
       <h3 className="mt-0 text-base font-semibold tracking-tight text-foreground">
         Bookmarks ({filtered.length})
       </h3>
@@ -823,7 +1064,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk }: {
+function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onCreateFolder: () => void;
@@ -831,6 +1072,7 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
   onImport: (file: File) => void;
   bulkMode: boolean;
   onToggleBulk: () => void;
+  onOpenSettings: () => void;
 }) {
   const { preference, toggle } = useTheme();
 
@@ -886,6 +1128,14 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
           </Button>
         </TooltipTrigger>
         <TooltipContent>{preference === "system" ? "System theme" : preference === "dark" ? "Dark mode" : "Light mode"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" onClick={onOpenSettings} className="h-9 w-9">
+            <Settings size={16} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Settings</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -1023,6 +1273,7 @@ export default function Library() {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<"all" | "web" | "ai_answer" | "ai_prompt">("all");
+  const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [browserImportPreview, setBrowserImportPreview] = useState<BrowserImportPreview | null>(null);
   const [includeDups, setIncludeDups] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -1036,6 +1287,12 @@ export default function Library() {
     onConfirm: (name: string) => void;
   } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [tagsExpanded, setTagsExpanded] = useState(true);
+  const [prefs, setPrefsState] = useState<Prefs>({ highlightDurationMs: 3000, snippetDismissMs: 12000 });
+  const [prefsDraft, setPrefsDraft] = useState<Prefs>({ highlightDurationMs: 3000, snippetDismissMs: 12000 });
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingDivider = useRef(false);
 
@@ -1043,6 +1300,7 @@ export default function Library() {
   const [pendingSave, setPendingSaveState] = useState<PendingSave | null>(null);
 
   useEffect(() => {
+    getPrefs().then((p) => { setPrefsState(p); setPrefsDraft(p); });
     getState().then((s) => {
       setState(s);
       const params = new URLSearchParams(window.location.search);
@@ -1070,6 +1328,18 @@ export default function Library() {
     if (!isPickerMode) return;
     getPendingSave().then((p) => setPendingSaveState(p));
   }, [isPickerMode]);
+
+  // Global ? shortcut for shortcuts cheat-sheet
+  useEffect(() => {
+    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen || isFolderModalOpen || !!browserImportPreview;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+        setShortcutsOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, isFolderModalOpen, browserImportPreview]);
 
   /* ─── DnD monitor ──────────────────────────────────────────── */
 
@@ -1169,6 +1439,8 @@ export default function Library() {
   const currentFolderId = activeFolderId ?? state.rootFolderId;
   const allBookmarks = Object.values(state.bookmarks);
 
+  const sortedTagDefs = Object.values(state.tagDefs ?? {}).sort((a, b) => a.name.localeCompare(b.name));
+
   const sourceFiltered = sourceFilter === "all"
     ? allBookmarks
     : allBookmarks.filter((b) => {
@@ -1181,9 +1453,13 @@ export default function Library() {
         return true;
       });
 
+  const tagFiltered = activeTagFilter
+    ? sourceFiltered.filter((b) => (b.tags ?? []).includes(activeTagFilter))
+    : sourceFiltered;
+
   const isSearching = searchQuery.trim().length > 0;
   const filtered = isSearching
-    ? sourceFiltered.filter((b) => {
+    ? tagFiltered.filter((b) => {
         const q = searchQuery.toLowerCase();
         return (
           b.name.toLowerCase().includes(q) ||
@@ -1193,7 +1469,7 @@ export default function Library() {
           (b.notes ?? "").toLowerCase().includes(q)
         );
       })
-    : sourceFiltered;
+    : tagFiltered;
 
   const refreshState = async () => {
     const s = await getState();
@@ -1339,6 +1615,27 @@ export default function Library() {
     } catch (err) {
       console.error("Failed to rename bookmark", err);
       showToast("Failed to rename bookmark", "error");
+    }
+  };
+
+  const handleSetBookmarkTags = async (bookmarkId: string, tagIds: string[]) => {
+    try {
+      await setBookmarkTags(bookmarkId, tagIds);
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to update tags", err);
+      showToast("Failed to update tags", "error");
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    try {
+      await deleteTag(tagId);
+      if (activeTagFilter === tagId) setActiveTagFilter(null);
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to delete tag", err);
+      showToast("Failed to delete tag", "error");
     }
   };
 
@@ -1506,6 +1803,10 @@ export default function Library() {
                     setBulkMode(!bulkMode);
                     if (bulkMode) setSelectedIds(new Set());
                   }}
+                  onOpenSettings={() => {
+                    setPrefsDraft(prefs);
+                    setSettingsOpen(true);
+                  }}
                 />
               </div>
               <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as typeof sourceFilter)}>
@@ -1517,6 +1818,19 @@ export default function Library() {
                   <SelectItem value="web">Web</SelectItem>
                   <SelectItem value="ai_answer">AI Answers</SelectItem>
                   <SelectItem value="ai_prompt">AI Prompts</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
+                <SelectTrigger className="w-auto h-9 text-xs shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="newest">Newest</SelectItem>
+                  <SelectItem value="oldest">Oldest</SelectItem>
+                  <SelectItem value="name_asc">Name A→Z</SelectItem>
+                  <SelectItem value="name_desc">Name Z→A</SelectItem>
+                  <SelectItem value="last_opened">Last Opened</SelectItem>
+                  <SelectItem value="most_opened">Most Opened</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1547,6 +1861,56 @@ export default function Library() {
                   setRenameDialog({ title, currentName, onConfirm: onCommit })
                 }
               />
+              {/* Tags section */}
+              <div className="mt-4 px-2">
+                <button
+                  onClick={() => setTagsExpanded((v) => !v)}
+                  className="flex items-center gap-1.5 w-full text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 hover:text-foreground transition-colors"
+                >
+                  {tagsExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                  Tags
+                </button>
+                {tagsExpanded && (
+                  <div className="space-y-0.5">
+                    {sortedTagDefs.map((tag) => {
+                      const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                      const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                      const count = allBookmarks.filter((b) => (b.tags ?? []).includes(tag.id)).length;
+                      return (
+                        <div key={tag.id} className="group/tag relative flex items-center">
+                          <button
+                            onClick={() => setActiveTagFilter(activeTagFilter === tag.id ? null : tag.id)}
+                            className={cn(
+                              "flex items-center gap-1.5 flex-1 rounded px-1.5 py-1 text-sm text-left transition-colors pr-6",
+                              count === 0 ? "opacity-50" : "",
+                              activeTagFilter === tag.id
+                                ? "bg-primary/10 text-primary"
+                                : "hover:bg-accent/50 text-foreground",
+                            )}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0 border border-border/50"
+                              style={{ background: colorHex ?? "transparent" }}
+                            />
+                            <span className="truncate flex-1">#{tag.name}</span>
+                            <span className="text-[10px] text-muted-foreground">{count}</span>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id); }}
+                            className="absolute right-1 opacity-0 group-hover/tag:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                            title="Delete tag"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {sortedTagDefs.length === 0 && (
+                      <p className="text-xs text-muted-foreground px-1.5 py-1">No tags yet</p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             {/* Drag divider */}
             <div
@@ -1556,6 +1920,15 @@ export default function Library() {
             />
             <div className="flex-1 min-w-0 p-4 overflow-y-auto bg-background">
               {!isSearching && <RecentPins bookmarks={allBookmarks} onOpen={handleOpenBookmark} />}
+              {activeTagFilter && state.tagDefs?.[activeTagFilter] && (
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <span className="text-xs text-muted-foreground">Filtered by tag:</span>
+                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
+                    #{state.tagDefs[activeTagFilter].name}
+                    <button onClick={() => setActiveTagFilter(null)} className="ml-0.5 hover:text-primary/70">&times;</button>
+                  </span>
+                </div>
+              )}
               <BookmarkList
                 bookmarks={filtered}
                 activeFolderId={currentFolderId}
@@ -1579,6 +1952,10 @@ export default function Library() {
                 onRequestRename={(title, currentName, onCommit) =>
                   setRenameDialog({ title, currentName, onConfirm: onCommit })
                 }
+                sortBy={sortBy}
+                tagDefs={state.tagDefs ?? {}}
+                onSetBookmarkTags={handleSetBookmarkTags}
+                isDark={isDark}
               />
             </div>
           </div>
@@ -1628,6 +2005,7 @@ export default function Library() {
             <DialogContent className="sm:max-w-sm">
               <DialogHeader>
                 <DialogTitle>{renameDialog.title}</DialogTitle>
+                <DialogDescription className="sr-only">Rename this item</DialogDescription>
               </DialogHeader>
               <RenameDialogBody
                 key={renameDialog.currentName}
@@ -1674,6 +2052,79 @@ export default function Library() {
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => setFolderModalOpen(false)}>Cancel</Button>
               <Button onClick={handleCreateFolderSubmit}>Create</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Settings dialog */}
+        <Dialog open={settingsOpen} onOpenChange={(open) => { if (!open) setSettingsOpen(false); }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Settings</DialogTitle>
+              <DialogDescription>Adjust ZeroPin behaviour preferences.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-5 py-1">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <label className="font-medium">Highlight fade</label>
+                  <span className="text-muted-foreground">{prefsDraft.highlightDurationMs / 1000}s</span>
+                </div>
+                <input
+                  type="range"
+                  min={1000} max={10000} step={1000}
+                  value={prefsDraft.highlightDurationMs}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, highlightDurationMs: Number(e.target.value) }))}
+                  className="w-full accent-primary"
+                />
+                <p className="text-xs text-muted-foreground">How long text stays highlighted after opening a snippet (1–10 s).</p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <label className="font-medium">Snippet card dismiss</label>
+                  <span className="text-muted-foreground">{prefsDraft.snippetDismissMs / 1000}s</span>
+                </div>
+                <input
+                  type="range"
+                  min={5000} max={30000} step={1000}
+                  value={prefsDraft.snippetDismissMs}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, snippetDismissMs: Number(e.target.value) }))}
+                  className="w-full accent-primary"
+                />
+                <p className="text-xs text-muted-foreground">How long the save-snippet card stays visible on AI pages (5–30 s).</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <Button variant="outline" onClick={() => setSettingsOpen(false)}>Cancel</Button>
+              <Button onClick={async () => {
+                await setPrefs(prefsDraft);
+                setPrefsState(prefsDraft);
+                setSettingsOpen(false);
+              }}>Save</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Keyboard shortcuts cheat-sheet */}
+        <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+          <DialogContent className="sm:max-w-xs">
+            <DialogHeader>
+              <DialogTitle>Keyboard shortcuts</DialogTitle>
+              <DialogDescription className="sr-only">Keyboard shortcuts reference</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5 text-sm">
+              {([
+                ["↑ / ↓", "Navigate bookmarks"],
+                ["Enter", "Open focused bookmark"],
+                ["E", "Rename focused bookmark"],
+                ["Delete / Backspace", "Delete focused bookmark"],
+                ["Esc", "Clear focus"],
+                ["?", "Show this panel"],
+              ] as [string, string][]).map(([key, desc]) => (
+                <div key={key} className="flex items-center gap-3">
+                  <kbd className="px-2 py-0.5 rounded bg-muted text-muted-foreground font-mono text-xs shrink-0">{key}</kbd>
+                  <span className="text-muted-foreground">{desc}</span>
+                </div>
+              ))}
             </div>
           </DialogContent>
         </Dialog>

@@ -1,5 +1,5 @@
 /// <reference types="chrome" />
-import { addPageBookmark, addSelectionBookmark, recordAnchorResolution, getState } from "./core/storage/local";
+import { addPageBookmark, addSelectionBookmark, recordAnchorResolution, getState, getDuplicateFolderName } from "./core/storage/local";
 import { isYouTubeWatchUrl, normalizeYouTubeCanonicalUrl } from "./core/youtube";
 import type { YouTubeCaptureResult } from "./core/youtube";
 import type { BookmarkMedia } from "./core/types";
@@ -156,8 +156,9 @@ async function saveWithFolder(
         anchor = r?.anchor;
       } catch { /* fallback */ }
     }
+    const dupFolderName = await getDuplicateFolderName(url, folderId);
     await addSelectionBookmark({ url, title, selectedText: selectionText, anchor, folderId });
-    await finishSave(tab?.id, folderId, "Saved snippet");
+    await finishSave(tab?.id, folderId, "Saved snippet", dupFolderName);
   } else {
     await savePagePossiblyWithYouTube(tab?.id, url, title, folderId);
     // finishSave toast is sent inside savePagePossiblyWithYouTube when folderId is set
@@ -167,11 +168,12 @@ async function saveWithFolder(
   void rebuildContextMenus();
 }
 
-async function finishSave(tabId: number | undefined, folderId: string, defaultMessage: string | null): Promise<void> {
+async function finishSave(tabId: number | undefined, folderId: string, defaultMessage: string | null, dupFolderName?: string | null): Promise<void> {
   if (tabId == null) return;
   const state = await getState();
   const folderName = state.folders[folderId]?.name ?? "folder";
-  const message = defaultMessage ?? `Saved to ${folderName}`;
+  const base = defaultMessage ?? `Saved to ${folderName}`;
+  const message = dupFolderName ? `Already pinned in "${dupFolderName}" — ${base}` : base;
   void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message });
 }
 
@@ -183,14 +185,22 @@ async function savePagePossiblyWithYouTube(
   title: string,
   folderId?: string,
 ): Promise<void> {
+  // Resolve the effective target folder (mirrors addPageBookmark fallback logic)
+  const stateForDup = await getState();
+  const effectiveFolderId = (folderId && stateForDup.folders[folderId]) ? folderId : stateForDup.rootFolderId;
+  const dupFolderName = await getDuplicateFolderName(url, effectiveFolderId);
+
+  function withDup(msg: string): string {
+    return dupFolderName ? `Already pinned in "${dupFolderName}" — ${msg}` : msg;
+  }
+
   if (!isYouTubeWatchUrl(url)) {
     await addPageBookmark(url, title, undefined, folderId);
     if (tabId != null && folderId) {
-      const state = await getState();
-      const folderName = state.folders[folderId]?.name ?? "folder";
-      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: `Saved to ${folderName}` });
+      const folderName = stateForDup.folders[folderId]?.name ?? "folder";
+      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: withDup(`Saved to ${folderName}`) });
     } else if (tabId != null) {
-      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: "Saved page" });
+      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: withDup("Saved page") });
     }
     return;
   }
@@ -198,7 +208,7 @@ async function savePagePossiblyWithYouTube(
   const canonicalUrl = normalizeYouTubeCanonicalUrl(url) ?? url;
   let saveUrl = canonicalUrl;
   let media: BookmarkMedia | undefined;
-  let toastMessage = folderId ? undefined : "Saved page"; // will be set below
+  let toastMessage = folderId ? undefined : withDup("Saved page");
 
   if (tabId != null) {
     const result = await sendMessage<YouTubeCaptureResult>(tabId, { type: "ZP_CAPTURE_YT_MOMENT" });
@@ -214,16 +224,15 @@ async function savePagePossiblyWithYouTube(
         captureMethod: result.captureMethod,
       };
       saveUrl = result.openUrl;
-      toastMessage = `Saved YouTube moment at ${result.timestampLabel}`;
+      toastMessage = withDup(`Saved YouTube moment at ${result.timestampLabel}`);
     } else if (result?.kind === "fallback") {
       saveUrl = result.canonicalUrl;
     }
 
     if (toastMessage === undefined) {
       // folderId set, non-YouTube path
-      const state = await getState();
-      const folderName = state.folders[folderId!]?.name ?? "folder";
-      toastMessage = `Saved to ${folderName}`;
+      const folderName = stateForDup.folders[folderId!]?.name ?? "folder";
+      toastMessage = withDup(`Saved to ${folderName}`);
     }
 
     void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: toastMessage });

@@ -49,6 +49,12 @@ import {
   recordBookmarkOpen,
   moveBookmarkWithinFolder,
   moveFolderToParent,
+  getDuplicateFolderName,
+  createTag,
+  renameTag,
+  deleteTag,
+  setTagColor,
+  setBookmarkTags,
 } from "./local";
 
 function makeState(): LibraryState {
@@ -737,6 +743,7 @@ describe("moveFolderToParent", () => {
 
   it("prevents moving a folder into its own descendant", async () => {
     await expect(moveFolderToParent("folderA", "childA")).rejects.toThrow(/descendant/i);
+
   });
 
   it("prevents moving root folder", async () => {
@@ -747,5 +754,157 @@ describe("moveFolderToParent", () => {
     await moveFolderToParent("folderA", "folderA");
     const state = await getState();
     expect(state.folders["folderA"].parentId).toBe("root");
+  });
+});
+
+// ── getDuplicateFolderName ──
+
+describe("getDuplicateFolderName", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("returns null when url is not pinned anywhere", async () => {
+    const result = await getDuplicateFolderName("https://example.com", "root");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when url is pinned in the same target folder", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+    const result = await getDuplicateFolderName("https://example.com", "root");
+    expect(result).toBeNull();
+  });
+
+  it("returns the folder name when url is pinned in a different folder", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "folderB");
+    const result = await getDuplicateFolderName("https://example.com", "root");
+    expect(result).toBe("Folder B");
+  });
+});
+
+// ── Tag CRUD ──
+
+describe("createTag", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("creates a TagDef with the correct name and returns its ID", async () => {
+    const id = await createTag("react");
+    const state = await getState();
+    expect(state.tagDefs?.[id]).toBeDefined();
+    expect(state.tagDefs![id].name).toBe("react");
+    expect(state.tagDefs![id].id).toBe(id);
+  });
+
+  it("stores an optional color", async () => {
+    const id = await createTag("typescript", "blue");
+    const state = await getState();
+    expect(state.tagDefs![id].color).toBe("blue");
+  });
+
+  it("returns a unique ID for each call", async () => {
+    const id1 = await createTag("react");
+    const id2 = await createTag("react");
+    expect(id1).not.toBe(id2);
+  });
+
+  it("creates tag without color when color is omitted", async () => {
+    const id = await createTag("css");
+    const state = await getState();
+    expect(state.tagDefs![id].color).toBeUndefined();
+  });
+});
+
+describe("renameTag", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("updates the tag name", async () => {
+    const id = await createTag("old-name");
+    await renameTag(id, "new-name");
+    const state = await getState();
+    expect(state.tagDefs![id].name).toBe("new-name");
+  });
+
+  it("throws when tag does not exist", async () => {
+    await expect(renameTag("missing", "x")).rejects.toThrow();
+  });
+});
+
+describe("deleteTag", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("removes the TagDef from tagDefs", async () => {
+    const id = await createTag("to-delete");
+    await deleteTag(id);
+    const state = await getState();
+    expect(state.tagDefs?.[id]).toBeUndefined();
+  });
+
+  it("removes the tagId from all bookmark.tags arrays", async () => {
+    await addPageBookmark("https://a.com", "A", undefined, "root");
+    await addPageBookmark("https://b.com", "B", undefined, "root");
+    const s = await getState();
+    const [bId1, bId2] = Object.keys(s.bookmarks);
+    const tagId = await createTag("shared");
+    await setBookmarkTags(bId1, [tagId]);
+    await setBookmarkTags(bId2, [tagId]);
+    await deleteTag(tagId);
+    const after = await getState();
+    expect(after.bookmarks[bId1].tags).not.toContain(tagId);
+    expect(after.bookmarks[bId2].tags).not.toContain(tagId);
+  });
+
+  it("throws when tag does not exist", async () => {
+    await expect(deleteTag("missing")).rejects.toThrow();
+  });
+});
+
+describe("setTagColor", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("sets the color on an existing tag", async () => {
+    const id = await createTag("colorable");
+    await setTagColor(id, "red");
+    const state = await getState();
+    expect(state.tagDefs![id].color).toBe("red");
+  });
+
+  it("clears the color when undefined is passed", async () => {
+    const id = await createTag("colorable", "green");
+    await setTagColor(id, undefined);
+    const state = await getState();
+    expect(state.tagDefs![id].color).toBeUndefined();
+  });
+
+  it("throws when tag does not exist", async () => {
+    await expect(setTagColor("missing", "red")).rejects.toThrow();
+  });
+});
+
+describe("setBookmarkTags", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("replaces the tags array on a bookmark", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    const t1 = await createTag("react");
+    const t2 = await createTag("typescript");
+    await setBookmarkTags(bId, [t1, t2]);
+    const after = await getState();
+    expect(after.bookmarks[bId].tags).toEqual([t1, t2]);
+  });
+
+  it("replaces existing tags with a new list", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    const t1 = await createTag("old");
+    const t2 = await createTag("new");
+    await setBookmarkTags(bId, [t1]);
+    await setBookmarkTags(bId, [t2]);
+    const after = await getState();
+    expect(after.bookmarks[bId].tags).toEqual([t2]);
+  });
+
+  it("throws when bookmark does not exist", async () => {
+    await expect(setBookmarkTags("missing", [])).rejects.toThrow();
   });
 });

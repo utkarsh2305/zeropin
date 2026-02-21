@@ -71,6 +71,18 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 6;
     return state;
   },
+  // v6 → v7: heal orphaned bookmarks (folderId references a deleted folder)
+  6: (state) => {
+    if (state.folders && state.bookmarks) {
+      for (const b of Object.values(state.bookmarks) as any[]) {
+        if (!state.folders[b.folderId]) {
+          b.folderId = state.rootFolderId;
+        }
+      }
+    }
+    state.schemaVersion = 7;
+    return state;
+  },
 };
 
 /**

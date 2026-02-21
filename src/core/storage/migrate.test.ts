@@ -74,6 +74,39 @@ describe("migrateState", () => {
     expect(result.inboxFolderId).toBeUndefined();
   });
 
+  it("v6 state → orphaned bookmarks (missing folderId) moved to rootFolderId", () => {
+    const raw = {
+      ...baseState,
+      schemaVersion: 6,
+      bookmarks: {
+        orphan: { id: "orphan", folderId: "deleted-folder", type: "PAGE", name: "Orphan", url: "https://orphan.com", domain: "orphan.com", sortKey: "1", createdAt: 1000, updatedAt: 1000 },
+        valid: { id: "valid", folderId: "root", type: "PAGE", name: "Valid", url: "https://valid.com", domain: "valid.com", sortKey: "2", createdAt: 1000, updatedAt: 1000 },
+      },
+    };
+    const result = migrateState(raw);
+    expect(result.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(result.bookmarks["orphan"].folderId).toBe("root");
+    expect(result.bookmarks["valid"].folderId).toBe("root");
+  });
+
+  it("v6 state → bookmarks in existing folders are not relocated", () => {
+    // Use a fresh object (not ...baseState) to avoid shared-reference mutations from earlier tests
+    const raw = {
+      schemaVersion: 6,
+      rootFolderId: "root",
+      folders: {
+        root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
+        work: { id: "work", parentId: "root", name: "Work", sortKey: "b", createdAt: 1000, updatedAt: 1000 },
+      },
+      bookmarks: {
+        b1: { id: "b1", folderId: "work", type: "PAGE", name: "Example", url: "https://example.com", domain: "example.com", sortKey: "1", createdAt: 1000, updatedAt: 1000 },
+      },
+    };
+    const result = migrateState(raw);
+    // "work" folder exists in folders, so b1 is not moved
+    expect(result.bookmarks["b1"].folderId).toBe("work");
+  });
+
   it("future version (v99) → returned as-is, no downgrade", () => {
     const raw = { ...baseState, schemaVersion: 99, extraField: "future" } as any;
     const result = migrateState(raw);

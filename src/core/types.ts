@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 6 as const;
+export const SCHEMA_VERSION = 7 as const;
 
 /** Optional media metadata attached to a bookmark. Currently only "youtube". */
 export interface BookmarkMedia {

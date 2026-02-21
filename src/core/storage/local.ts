@@ -111,7 +111,10 @@ export function computeSnippetHash(url: string, snippetText?: string): string {
 
 export async function addPageBookmark(url: string, title: string, media?: BookmarkMedia, inputFolderId?: string): Promise<void> {
   const state = await getState();
-  const folderId = inputFolderId ?? state.rootFolderId;
+  // Fall back to root if the requested folder no longer exists
+  const folderId = (inputFolderId && state.folders[inputFolderId])
+    ? inputFolderId
+    : state.rootFolderId;
   const hash = computeSnippetHash(url);
 
   // Dedup: check for existing bookmark with same hash in same folder
@@ -191,7 +194,10 @@ export async function addSelectionBookmark(input: {
   };
 }): Promise<void> {
   const state = await getState();
-  const folderId = input.folderId ?? state.rootFolderId;
+  // Fall back to root if the requested folder no longer exists
+  const folderId = (input.folderId && state.folders[input.folderId])
+    ? input.folderId
+    : state.rootFolderId;
   const hash = computeSnippetHash(input.url, input.selectedText);
 
   // Dedup: check for existing bookmark with same hash in same folder

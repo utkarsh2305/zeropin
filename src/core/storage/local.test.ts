@@ -668,6 +668,56 @@ describe("moveBookmarkWithinFolder", () => {
   });
 });
 
+// ── addPageBookmark — stale folderId fallback ──
+
+describe("addPageBookmark — stale folderId fallback", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("falls back to rootFolderId when provided folderId does not exist", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "ghost-folder-id");
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.folderId).toBe("root");
+  });
+
+  it("uses provided folderId when folder exists", async () => {
+    await addPageBookmark("https://example.com", "Example", undefined, "folderB");
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.folderId).toBe("folderB");
+  });
+});
+
+// ── addSelectionBookmark — stale folderId fallback ──
+
+describe("addSelectionBookmark — stale folderId fallback", () => {
+  beforeEach(() => setStoreState(makeState()));
+
+  it("falls back to rootFolderId when provided folderId does not exist", async () => {
+    await addSelectionBookmark({
+      url: "https://example.com",
+      title: "Ex",
+      selectedText: "hello",
+      folderId: "deleted-folder-id",
+    });
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.folderId).toBe("root");
+  });
+
+  it("uses provided folderId when folder exists", async () => {
+    await addSelectionBookmark({
+      url: "https://example.com",
+      title: "Ex",
+      selectedText: "hello",
+      folderId: "folderB",
+    });
+    const state = await getState();
+    const bm = Object.values(state.bookmarks)[0];
+    expect(bm.folderId).toBe("folderB");
+  });
+});
+
 // ── moveFolderToParent ──
 
 describe("moveFolderToParent", () => {

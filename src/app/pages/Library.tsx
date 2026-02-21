@@ -270,9 +270,10 @@ type FolderTreeProps = {
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
   onColorChange: (id: string, color: string | undefined) => void;
+  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
 };
 
-function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange }: FolderTreeProps) {
+function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename }: FolderTreeProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const toggleFolder = (folderId: string) => {
@@ -304,8 +305,7 @@ function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFol
         onSelect={() => onSelectFolder(folderId)}
         onToggleCollapse={() => toggleFolder(folderId)}
         onRename={() => {
-          const newName = prompt("New folder name:", folder.name);
-          if (newName) onRenameFolder(folderId, newName);
+          onRequestRename("Rename folder", folder.name, (name) => onRenameFolder(folderId, name));
         }}
         onDelete={() => onDeleteFolder(folderId)}
         onColorChange={(color) => onColorChange(folderId, color)}
@@ -685,9 +685,10 @@ type BookmarkListProps = {
   bulkMode: boolean;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
+  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
 
   const activeIds = isSearching ? null : getDescendantFolderIds(activeFolderId, folders);
@@ -734,8 +735,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       bookmark={b}
       onOpen={() => handleOpenBookmark(b)}
       onRename={() => {
-        const newName = prompt("New name:", b.name);
-        if (newName) onRenameBookmark(b.id, newName);
+        onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(b.id, name));
       }}
       onDelete={() => onDeleteBookmark(b.id)}
       folderName={folderName}
@@ -980,6 +980,37 @@ function countFolderContents(
   return { bookmarkCount, childFolderCount: descendants.size };
 }
 
+function RenameDialogBody({
+  initialValue,
+  onCommit,
+  onCancel,
+}: {
+  initialValue: string;
+  onCommit: (val: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initialValue);
+  const trimmed = value.trim();
+  return (
+    <>
+      <Input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && trimmed) { e.preventDefault(); onCommit(trimmed); }
+          if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+        }}
+        ref={(el) => el?.select()}
+      />
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button onClick={() => { if (trimmed) onCommit(trimmed); }} disabled={!trimmed}>OK</Button>
+      </div>
+    </>
+  );
+}
+
 export default function Library() {
   const { showToast } = useToast();
   const { isDark } = useTheme();
@@ -998,6 +1029,11 @@ export default function Library() {
     title: string;
     description: string;
     onConfirm: () => Promise<void>;
+  } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{
+    title: string;
+    currentName: string;
+    onConfirm: (name: string) => void;
   } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1507,6 +1543,9 @@ export default function Library() {
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
                 onColorChange={handleSetFolderColor}
+                onRequestRename={(title, currentName, onCommit) =>
+                  setRenameDialog({ title, currentName, onConfirm: onCommit })
+                }
               />
             </div>
             {/* Drag divider */}
@@ -1537,6 +1576,9 @@ export default function Library() {
                     return next;
                   });
                 }}
+                onRequestRename={(title, currentName, onCommit) =>
+                  setRenameDialog({ title, currentName, onConfirm: onCommit })
+                }
               />
             </div>
           </div>
@@ -1578,6 +1620,23 @@ export default function Library() {
               }
             }}
           />
+        )}
+
+        {/* Rename dialog — replaces window.prompt() */}
+        {renameDialog && (
+          <Dialog open onOpenChange={(open) => { if (!open) setRenameDialog(null); }}>
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>{renameDialog.title}</DialogTitle>
+              </DialogHeader>
+              <RenameDialogBody
+                key={renameDialog.currentName}
+                initialValue={renameDialog.currentName}
+                onCommit={(val) => { renameDialog.onConfirm(val); setRenameDialog(null); }}
+                onCancel={() => setRenameDialog(null)}
+              />
+            </DialogContent>
+          </Dialog>
         )}
 
         {/* Generic confirm dialog — replaces window.confirm() */}

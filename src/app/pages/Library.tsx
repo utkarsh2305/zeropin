@@ -1432,9 +1432,12 @@ function RenameDialogBody({
 }) {
   const [value, setValue] = useState(initialValue);
   const trimmed = value.trim();
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { inputRef.current?.select(); }, []);
   return (
     <>
       <Input
+        ref={inputRef}
         autoFocus
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -1442,7 +1445,6 @@ function RenameDialogBody({
           if (e.key === "Enter" && trimmed) { e.preventDefault(); onCommit(trimmed); }
           if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         }}
-        ref={(el) => el?.select()}
       />
       <div className="flex justify-end gap-2 mt-2">
         <Button variant="outline" onClick={onCancel}>Cancel</Button>

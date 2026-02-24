@@ -1,3 +1,5 @@
+import { storageGet, storageSet } from "./chromeApi";
+
 const PREFS_KEY = "zp_prefs";
 
 export interface Prefs {
@@ -23,26 +25,6 @@ const DEFAULT_PREFS: Prefs = {
   unreadTrackingEnabled: false,
   unreadThresholdDays: 60,
 };
-
-function storageGet<T>(key: string): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get([key], (items) => {
-      const err = chrome.runtime.lastError;
-      if (err) return reject(err);
-      resolve(items[key] as T | undefined);
-    });
-  });
-}
-
-function storageSet<T>(key: string, value: T): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set({ [key]: value }, () => {
-      const err = chrome.runtime.lastError;
-      if (err) return reject(err);
-      resolve();
-    });
-  });
-}
 
 /** Returns stored prefs merged with defaults (missing keys fall back to defaults). */
 export async function getPrefs(): Promise<Prefs> {

@@ -1,32 +1,11 @@
 import type { LibraryState, BookmarkMedia } from "../types";
 import { SCHEMA_VERSION } from "../types";
 import { migrateState } from "./migrate";
+import { storageGet, storageSet } from "./chromeApi";
 
 const KEY = "zp_state";
 const OLD_KEY = "zr_library_state";
 const now = () => Date.now();
-
-/** Promise wrapper around chrome.storage.local.get */
-function storageGet<T>(key: string): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get([key], (items) => {
-      const err = chrome.runtime.lastError;
-      if (err) return reject(err);
-      resolve(items[key] as T | undefined);
-    });
-  });
-}
-
-/** Promise wrapper around chrome.storage.local.set */
-function storageSet<T>(key: string, value: T): Promise<void> {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set({ [key]: value }, () => {
-      const err = chrome.runtime.lastError;
-      if (err) return reject(err);
-      resolve();
-    });
-  });
-}
 
 export async function getState(): Promise<LibraryState> {
   let state = await storageGet<LibraryState>(KEY);

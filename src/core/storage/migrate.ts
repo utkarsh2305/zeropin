@@ -92,6 +92,11 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 8;
     return state;
   },
+  // v8 → v9: add reminderAt and reminderSnoozedUntil fields (optional — no initialization needed)
+  8: (state) => {
+    state.schemaVersion = 9;
+    return state;
+  },
 };
 
 /**

@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 8 as const;
+export const SCHEMA_VERSION = 9 as const;
 
 /** Optional media metadata attached to a bookmark. Currently only "youtube". */
 export interface BookmarkMedia {
@@ -55,6 +55,10 @@ export interface Bookmark {
   openCount?: number;
   lastOpenedAt?: number;
   lastResolvedConfidence?: number;
+  /** Unix ms timestamp when this reminder should surface. Absent = no reminder set. */
+  reminderAt?: number;
+  /** Unix ms timestamp until which this reminder is snoozed. Absent or past = not snoozed. */
+  reminderSnoozedUntil?: number;
 
   /** YouTube (or future) media metadata. Present only for YouTube moment pins. */
   media?: BookmarkMedia;
@@ -90,6 +94,7 @@ export interface Bookmark {
       cssPath?: string;
       xpath?: string;
       containerTextSample?: string;
+      githubLineNumber?: number;
     };
     repairedAt?: number;
   };

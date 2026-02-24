@@ -228,6 +228,7 @@ function Popup() {
                       src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
                       alt=""
                       className="w-4 h-4 shrink-0 rounded-sm mt-0.5"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">

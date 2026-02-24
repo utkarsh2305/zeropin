@@ -2,9 +2,10 @@
 import { addPageBookmark, addSelectionBookmark, recordAnchorResolution, getState, getDuplicateFolderName } from "./core/storage/local";
 import { isYouTubeWatchUrl, normalizeYouTubeCanonicalUrl } from "./core/youtube";
 import type { YouTubeCaptureResult } from "./core/youtube";
-import type { BookmarkMedia } from "./core/types";
+import type { BookmarkMedia, Bookmark } from "./core/types";
 import { getRecentFolderIds, updateRecents, setPendingSave, RECENTS_KEY, computeFolderLabel } from "./core/storage/recents";
 import type { PendingSave } from "./core/storage/recents";
+import { getPrefs } from "./core/storage/prefs";
 
 function tabsGet(tabId: number): Promise<chrome.tabs.Tab> {
   return new Promise((resolve, reject) => {
@@ -69,12 +70,79 @@ async function rebuildContextMenus(): Promise<void> {
   });
 }
 
+// ── Reminder helpers ──────────────────────────────────────────────────────────
+
+function isDue(b: Bookmark): boolean {
+  if (!b.reminderAt) return false;
+  if (b.reminderAt > Date.now()) return false;
+  if (b.reminderSnoozedUntil && b.reminderSnoozedUntil > Date.now()) return false;
+  return true;
+}
+
+async function updateReminderBadge(): Promise<void> {
+  const state = await getState().catch(() => null);
+  if (!state) return;
+  const count = Object.values(state.bookmarks).filter(isDue).length;
+  const text = count > 0 ? String(count) : "";
+  chrome.action.setBadgeText({ text });
+  if (count > 0) chrome.action.setBadgeBackgroundColor({ color: "#f59e0b" });
+}
+
+async function scheduleOrRefreshDailyAlarm(): Promise<void> {
+  const prefs = await getPrefs();
+  if (!prefs.reminderNotificationEnabled) {
+    chrome.alarms.clear("zp_daily_check");
+    return;
+  }
+  // Fire at next occurrence of reminderNotificationHour:00 local time
+  const nowDate = new Date();
+  const next = new Date();
+  next.setHours(prefs.reminderNotificationHour, 0, 0, 0);
+  if (next <= nowDate) next.setDate(next.getDate() + 1);
+  chrome.alarms.create("zp_daily_check", {
+    when: next.getTime(),
+    periodInMinutes: 1440,
+  });
+}
+
+// ── Alarm listener ────────────────────────────────────────────────────────────
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== "zp_daily_check") return;
+  await updateReminderBadge();
+  const prefs = await getPrefs();
+  if (!prefs.reminderNotificationEnabled) return;
+  const state = await getState().catch(() => null);
+  if (!state) return;
+  const count = Object.values(state.bookmarks).filter(isDue).length;
+  if (count === 0) return;
+  chrome.notifications.create("zp_reminders", {
+    type: "basic",
+    iconUrl: "icons/icon48.png",
+    title: "ZeroPin",
+    message: `${count} reminder${count === 1 ? "" : "s"} waiting for you.`,
+  });
+});
+
+chrome.notifications.onClicked.addListener((id) => {
+  if (id === "zp_reminders") {
+    chrome.tabs.create({ url: chrome.runtime.getURL("library.html") });
+    chrome.notifications.clear(id);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 chrome.runtime.onInstalled.addListener(() => {
   void rebuildContextMenus();
+  void scheduleOrRefreshDailyAlarm();
+  void updateReminderBadge();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void rebuildContextMenus();
+  void scheduleOrRefreshDailyAlarm();
+  void updateReminderBadge();
 });
 
 // ── Click handler ─────────────────────────────────────────────────────────────
@@ -316,6 +384,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
   if (request.type === "ZP_FOLDERS_CHANGED") {
     void rebuildContextMenus();
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (request.type === "ZP_REMINDERS_CHANGED") {
+    void updateReminderBadge();
     sendResponse({ ok: true });
     return false;
   }

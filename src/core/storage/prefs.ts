@@ -5,11 +5,17 @@ export interface Prefs {
   highlightDurationMs: number;
   /** Snippet card auto-dismiss delay in ms. Default 12000. Range 5000–30000. */
   snippetDismissMs: number;
+  /** Whether to fire a single batched OS notification when daily reminders are due. Default false (opt-in). */
+  reminderNotificationEnabled: boolean;
+  /** Hour of day (0–23) to fire the daily reminder notification. Default 9 (9 AM). */
+  reminderNotificationHour: number;
 }
 
 const DEFAULT_PREFS: Prefs = {
   highlightDurationMs: 3000,
   snippetDismissMs: 12000,
+  reminderNotificationEnabled: false,
+  reminderNotificationHour: 9,
 };
 
 function storageGet<T>(key: string): Promise<T | undefined> {

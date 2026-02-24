@@ -55,6 +55,9 @@ import {
   deleteTag,
   setTagColor,
   setBookmarkTags,
+  setBookmarkReminder,
+  snoozeBookmarkReminder,
+  dismissBookmarkReminder,
 } from "./local";
 
 function makeState(): LibraryState {
@@ -906,5 +909,91 @@ describe("setBookmarkTags", () => {
 
   it("throws when bookmark does not exist", async () => {
     await expect(setBookmarkTags("missing", [])).rejects.toThrow();
+  });
+});
+
+// ── setBookmarkReminder ──
+
+describe("setBookmarkReminder", () => {
+  beforeEach(async () => {
+    setStoreState(makeState());
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+  });
+
+  it("sets reminderAt on a bookmark", async () => {
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    const ts = Date.now() + 86400000;
+    await setBookmarkReminder(bId, ts);
+    const after = await getState();
+    expect(after.bookmarks[bId].reminderAt).toBe(ts);
+  });
+
+  it("clears reminderAt and reminderSnoozedUntil when set to null", async () => {
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    await setBookmarkReminder(bId, Date.now() + 1000);
+    await snoozeBookmarkReminder(bId, Date.now() + 86400000);
+    await setBookmarkReminder(bId, null);
+    const after = await getState();
+    expect(after.bookmarks[bId].reminderAt).toBeUndefined();
+    expect(after.bookmarks[bId].reminderSnoozedUntil).toBeUndefined();
+  });
+
+  it("clears reminderSnoozedUntil when a new reminderAt is set", async () => {
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    await setBookmarkReminder(bId, Date.now() + 1000);
+    await snoozeBookmarkReminder(bId, Date.now() + 86400000);
+    await setBookmarkReminder(bId, Date.now() + 172800000);
+    const after = await getState();
+    expect(after.bookmarks[bId].reminderSnoozedUntil).toBeUndefined();
+  });
+
+  it("throws for an unknown bookmark ID", async () => {
+    await expect(setBookmarkReminder("nonexistent", Date.now())).rejects.toThrow();
+  });
+});
+
+// ── snoozeBookmarkReminder ──
+
+describe("snoozeBookmarkReminder", () => {
+  beforeEach(async () => {
+    setStoreState(makeState());
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+  });
+
+  it("sets reminderSnoozedUntil on a bookmark", async () => {
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    await setBookmarkReminder(bId, Date.now() - 1000);
+    const until = Date.now() + 86400000;
+    await snoozeBookmarkReminder(bId, until);
+    const after = await getState();
+    expect(after.bookmarks[bId].reminderSnoozedUntil).toBe(until);
+  });
+
+  it("throws for an unknown bookmark ID", async () => {
+    await expect(snoozeBookmarkReminder("nonexistent", Date.now())).rejects.toThrow();
+  });
+});
+
+// ── dismissBookmarkReminder ──
+
+describe("dismissBookmarkReminder", () => {
+  beforeEach(async () => {
+    setStoreState(makeState());
+    await addPageBookmark("https://example.com", "Example", undefined, "root");
+  });
+
+  it("clears reminderAt and reminderSnoozedUntil", async () => {
+    const s = await getState();
+    const bId = Object.keys(s.bookmarks)[0];
+    await setBookmarkReminder(bId, Date.now() - 1000);
+    await snoozeBookmarkReminder(bId, Date.now() + 86400000);
+    await dismissBookmarkReminder(bId);
+    const after = await getState();
+    expect(after.bookmarks[bId].reminderAt).toBeUndefined();
+    expect(after.bookmarks[bId].reminderSnoozedUntil).toBeUndefined();
   });
 });

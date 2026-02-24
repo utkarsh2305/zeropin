@@ -58,6 +58,7 @@ interface SnippetAnchor {
     cssPath?: string;
     xpath?: string;
     containerTextSample?: string;
+    githubLineNumber?: number;
   };
   repairedAt?: number;
 }
@@ -946,5 +947,83 @@ describe("ZP_GET_SELECTION_PAYLOAD handler logic", () => {
 
     const hasSelection = sel.toString().trim().length > 0;
     expect(hasSelection).toBe(false);
+  });
+});
+
+// ── GitHub blob page helpers ──────────────────────────────────────────────────
+
+/** Re-implements the GitHub line-number extraction logic from captureContainerHint(). */
+function extractGithubLineNumber(range: Range): number | undefined {
+  const ancestor = range.commonAncestorContainer;
+  let node: Element | null =
+    ancestor.nodeType === Node.ELEMENT_NODE
+      ? (ancestor as Element)
+      : ancestor.parentElement;
+  while (node && node !== document.body) {
+    const lineEl = node.closest("[id^='L']") as HTMLElement | null;
+    if (lineEl?.id) {
+      const m = lineEl.id.match(/^LC?(\d+)$/);
+      if (m) return parseInt(m[1], 10);
+    }
+    node = node.parentElement;
+  }
+  return undefined;
+}
+
+describe("GitHub blob page: captureContainerHint line number extraction", () => {
+  beforeEach(() => { document.body.innerHTML = ""; });
+
+  it("CSTEST-040 extracts line number from id='LC42' (new React viewer code span)", () => {
+    document.body.innerHTML = `
+      <div class="react-code-lines">
+        <span id="LC42" class="react-file-line">const x = 1;</span>
+      </div>
+    `;
+    const codeSpan = document.body.querySelector("#LC42")!;
+    const range = document.createRange();
+    range.selectNodeContents(codeSpan);
+    expect(extractGithubLineNumber(range)).toBe(42);
+  });
+
+  it("CSTEST-041 does not extract line number when no L/LC ancestor exists", () => {
+    document.body.innerHTML = `<p>Some plain paragraph text here.</p>`;
+    const range = document.createRange();
+    range.selectNodeContents(document.body.querySelector("p")!);
+    expect(extractGithubLineNumber(range)).toBeUndefined();
+  });
+});
+
+describe("GitHub blob page: hash navigation logic", () => {
+  it("CSTEST-042 sets hash to #L{n} when githubLineNumber stored and URL is github.com blob", () => {
+    const anchor: SnippetAnchor = {
+      text: "const x = 1;",
+      containerHint: { githubLineNumber: 55 },
+    };
+    const hostname = "github.com";
+    const pathname = "/user/repo/blob/main/file.ts";
+
+    // Re-implements the guard in processHighlightRequest
+    let resultHash = "";
+    const ghLine = anchor.containerHint?.githubLineNumber;
+    if (ghLine !== undefined && hostname === "github.com" && pathname.includes("/blob/")) {
+      resultHash = "#L" + ghLine;
+    }
+    expect(resultHash).toBe("#L55");
+  });
+
+  it("CSTEST-043 does not set hash when not on github.com", () => {
+    const anchor: SnippetAnchor = {
+      text: "some text",
+      containerHint: { githubLineNumber: 10 },
+    };
+    const hostname: string = "example.com";
+    const pathname: string = "/some/page";
+
+    let resultHash = "";
+    const ghLine = anchor.containerHint?.githubLineNumber;
+    if (ghLine !== undefined && hostname === "github.com" && pathname.includes("/blob/")) {
+      resultHash = "#L" + ghLine;
+    }
+    expect(resultHash).toBe("");
   });
 });

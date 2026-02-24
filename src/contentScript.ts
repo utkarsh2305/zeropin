@@ -61,6 +61,7 @@ interface SnippetAnchor {
     cssPath?: string;
     xpath?: string;
     containerTextSample?: string;
+    githubLineNumber?: number;
   };
   repairedAt?: number;
 }
@@ -236,9 +237,36 @@ function captureContainerHint(range: Range): SnippetAnchor["containerHint"] | nu
     (container as HTMLElement).innerText?.slice(0, CONTAINER_TEXT_SAMPLE_LENGTH) ?? ""
   ) || undefined;
 
+  // GitHub blob: capture the starting line number so the virtual renderer
+  // can be scrolled to the right position before text matching runs.
+  let githubLineNumber: number | undefined;
+  if (
+    window.location.hostname === "github.com" &&
+    window.location.pathname.includes("/blob/")
+  ) {
+    let node: Element | null =
+      ancestor.nodeType === Node.ELEMENT_NODE
+        ? (ancestor as Element)
+        : ancestor.parentElement;
+    while (node && node !== document.body) {
+      // GitHub uses id="L42" on line-number elements and id="LC42" on code
+      // elements (both new React viewer and old table viewer). Either matches.
+      const lineEl = node.closest("[id^='L']") as HTMLElement | null;
+      if (lineEl?.id) {
+        const m = lineEl.id.match(/^LC?(\d+)$/);
+        if (m) {
+          githubLineNumber = parseInt(m[1], 10);
+          break;
+        }
+      }
+      node = node.parentElement;
+    }
+  }
+
   return {
     cssPath: cssPath || undefined,
     containerTextSample,
+    ...(githubLineNumber !== undefined ? { githubLineNumber } : {}),
   };
 }
 
@@ -1315,6 +1343,18 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
     startMutationRetry(anchor, bookmarkId);
   };
 
+  // GitHub blob: navigate to the stored line so GitHub's virtual renderer
+  // renders those lines into the DOM. The MutationObserver in startMutationRetry
+  // will then find the text when it appears.
+  const ghLine = anchor.containerHint?.githubLineNumber;
+  if (
+    ghLine !== undefined &&
+    window.location.hostname === "github.com" &&
+    window.location.pathname.includes("/blob/")
+  ) {
+    window.location.hash = "#L" + ghLine;
+  }
+
   // Use DOM stabilization gate for chat pages, simple delay for others
   if (isChatPage(anchor)) {
     waitForDomStable(getChatRootSelector(anchor)).then(doHighlight);
@@ -1357,6 +1397,20 @@ function startMutationRetry(anchor: SnippetAnchor, bookmarkId?: string): void {
   const timeoutHandle = setTimeout(() => finish(false), HIGHLIGHT_RETRY_TIMEOUT_MS);
 }
 
+// ── URL normalisation helper ──────────────────────────────────────────────────
+// Hash fragments are ephemeral (GitHub line links, etc.) and must not prevent
+// anchor resolution.  Strip them before comparing stored vs. current URL.
+
+function stripHash(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 // ── Storage listener for highlight requests ──
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -1368,7 +1422,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       bookmarkId?: string;
       timestamp?: number;
     } | undefined;
-    if (newValue && newValue.url === window.location.href && newValue.anchor) {
+    if (
+      newValue &&
+      stripHash(newValue.url ?? "") === stripHash(window.location.href) &&
+      newValue.anchor
+    ) {
       processHighlightRequest(newValue.anchor, newValue.bookmarkId);
     }
   }
@@ -1387,8 +1445,15 @@ chrome.storage.local.get("ZP_HIGHLIGHT_REQUEST", (items) => {
     bookmarkId?: string;
     timestamp?: number;
   } | undefined;
-  if (!pending || pending.url !== window.location.href || !pending.anchor) return;
+  if (!pending || !pending.anchor) return;
+  if (stripHash(pending.url ?? "") !== stripHash(window.location.href)) {
+    console.warn(
+      `ZP: highlight request URL mismatch — stored: "${pending.url}", current: "${window.location.href}"`
+    );
+    return;
+  }
   if (pending.timestamp && Date.now() - pending.timestamp > MAX_REQUEST_AGE_MS) {
+    console.warn("ZP: highlight request expired (>30 s old)");
     chrome.storage.local.remove("ZP_HIGHLIGHT_REQUEST");
     return;
   }

@@ -36,6 +36,8 @@ describe("getPrefs", () => {
     const p = await getPrefs();
     expect(p.highlightDurationMs).toBe(3000);
     expect(p.snippetDismissMs).toBe(12000);
+    expect(p.reminderNotificationEnabled).toBe(false);
+    expect(p.reminderNotificationHour).toBe(9);
   });
 
   it("returns stored values when present", async () => {
@@ -81,5 +83,19 @@ describe("setPrefs", () => {
     const p = await getPrefs();
     expect(p.highlightDurationMs).toBe(4000);
     expect(p.snippetDismissMs).toBe(18000);
+  });
+
+  it("persists reminderNotificationEnabled", async () => {
+    await setPrefs({ reminderNotificationEnabled: true });
+    const p = await getPrefs();
+    expect(p.reminderNotificationEnabled).toBe(true);
+  });
+
+  it("persists reminderNotificationHour and leaves other fields at default", async () => {
+    await setPrefs({ reminderNotificationHour: 8 });
+    const p = await getPrefs();
+    expect(p.reminderNotificationHour).toBe(8);
+    expect(p.reminderNotificationEnabled).toBe(false);
+    expect(p.highlightDurationMs).toBe(3000);
   });
 });

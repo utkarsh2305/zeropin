@@ -1,12 +1,13 @@
 # Test Suite
 
-> **373 tests** across 11 files. Run: `npm test`
+> **389 tests** across 12 files. Run: `npm test`
 > Keep this file in sync — update the table whenever a test is added, renamed, or removed.
 
 ## Table of Contents
 - [Schema Migration (MIG)](#schema-migration)
 - [Storage – Core (LOCAL)](#storage--core)
 - [Storage – Preferences (PREFS)](#storage--preferences)
+- [AI Tag Suggestions (AITAGS)](#ai-tag-suggestions)
 - [Storage – Recents (RECENTS)](#storage--recents)
 - [Storage – Browser Import (IMPORT)](#storage--browser-import)
 - [YouTube Utilities (YT)](#youtube-utilities)
@@ -19,7 +20,7 @@
 ---
 
 ## Schema Migration
-*File: `src/core/storage/migrate.test.ts` — 14 tests*
+*File: `src/core/storage/migrate.test.ts` — 15 tests*
 
 | ID | Area | Description | Acceptance Criteria | Remarks |
 |----|------|-------------|---------------------|---------|
@@ -37,11 +38,12 @@
 | MIG-012 | Schema Migration | Running migration twice on the same state produces the same result (idempotent). | `second` deep-equals `first` | Prevents repeated-migration side effects |
 | MIG-013 | Schema Migration | v7 state backfills `tags: []` on every bookmark and adds `tagDefs: {}` to state. | every bookmark has `tags` equal to `[]`; `result.tagDefs` equals `{}` | Tag system introduced in v8 |
 | MIG-014 | Schema Migration | v7 migration preserves an existing tags array on a bookmark (idempotent). | `result.bookmarks["b1"].tags` equals `["tag1"]` | Guards against overwriting user-assigned tags during re-migration |
+| MIG-015 | Schema Migration | v8 state is migrated to v9; reminder fields remain absent (optional fields). | `schemaVersion === 9`; `reminderAt` and `reminderSnoozedUntil` are both undefined on bookmarks | Reminder fields are optional — no initialization needed |
 
 ---
 
 ## Storage – Core
-*File: `src/core/storage/local.test.ts` — 82 tests*
+*File: `src/core/storage/local.test.ts` — 89 tests*
 
 | ID | Area | Description | Acceptance Criteria | Remarks |
 |----|------|-------------|---------------------|---------|
@@ -127,11 +129,18 @@
 | LOCAL-080 | Storage – Tags | setBookmarkTags replaces the tags array on a bookmark. | `bookmark.tags` equals `[t1, t2]` | |
 | LOCAL-081 | Storage – Tags | setBookmarkTags replaces an existing tag list with a new one. | `bookmark.tags` equals `[t2]` only | |
 | LOCAL-082 | Storage – Tags | setBookmarkTags throws when the bookmark does not exist. | rejects with an error | |
+| LOCAL-083 | Storage – Reminders | setBookmarkReminder sets reminderAt on a bookmark. | `bookmark.reminderAt === ts` | |
+| LOCAL-084 | Storage – Reminders | setBookmarkReminder(null) clears reminderAt and reminderSnoozedUntil. | both fields are undefined after clearing | |
+| LOCAL-085 | Storage – Reminders | setBookmarkReminder with a new value clears any existing reminderSnoozedUntil. | `reminderSnoozedUntil` is undefined after update | |
+| LOCAL-086 | Storage – Reminders | setBookmarkReminder throws for an unknown bookmark ID. | rejects with an error | |
+| LOCAL-087 | Storage – Reminders | snoozeBookmarkReminder sets reminderSnoozedUntil on a bookmark. | `bookmark.reminderSnoozedUntil === until` | |
+| LOCAL-088 | Storage – Reminders | snoozeBookmarkReminder throws for an unknown bookmark ID. | rejects with an error | |
+| LOCAL-089 | Storage – Reminders | dismissBookmarkReminder clears both reminderAt and reminderSnoozedUntil. | both fields are undefined after dismiss | |
 
 ---
 
 ## Storage – Preferences
-*File: `src/core/storage/prefs.test.ts` — 7 tests*
+*File: `src/core/storage/prefs.test.ts` — 9 tests*
 
 | ID | Area | Description | Acceptance Criteria | Remarks |
 |----|------|-------------|---------------------|---------|
@@ -142,6 +151,22 @@
 | PREFS-005 | Storage – Prefs | setPrefs persists both fields when both are provided. | `highlightDurationMs === 8000`; `snippetDismissMs === 25000` | |
 | PREFS-006 | Storage – Prefs | An empty setPrefs call leaves existing values unchanged. | `snippetDismissMs` remains 15000 | |
 | PREFS-007 | Storage – Prefs | Subsequent partial setPrefs updates merge correctly. | first call sets one field; second call sets another; both are retained | |
+| PREFS-008 | Storage – Prefs | setPrefs persists reminderNotificationEnabled. | `reminderNotificationEnabled === true` after update | |
+| PREFS-009 | Storage – Prefs | setPrefs persists reminderNotificationHour and leaves unrelated fields at default. | `reminderNotificationHour === 8`; enabled defaults to false; highlightDurationMs defaults to 3000 | |
+
+---
+
+## AI Tag Suggestions
+*File: `src/core/aiTags.test.ts` — 6 tests*
+
+| ID | Area | Description | Acceptance Criteria | Remarks |
+|----|------|-------------|---------------------|---------|
+| AITAGS-001 | Smart Tagging | suggestTagIds returns [] when tagDefs is empty. | result equals `[]` | No tags to suggest from |
+| AITAGS-002 | Smart Tagging | Domain heuristics match GitHub URL to dev-related tags. | result contains "dev" tag ID; excludes "recipes" tag ID | Gemini Nano unavailable in test env — heuristics path |
+| AITAGS-003 | Smart Tagging | Domain heuristics match YouTube URL to video-related tags. | result contains "video" and "watch" tag IDs; excludes "unrelated" | |
+| AITAGS-004 | Smart Tagging | No match returns [] for an unrecognised domain. | result equals `[]` | Non-pattern domain with no overlapping keywords |
+| AITAGS-005 | Smart Tagging | Tag name matching is case-insensitive. | "Dev" and "CODE" tags are both matched for a stackoverflow.com URL | |
+| AITAGS-006 | Smart Tagging | Domain heuristics match docs subdomain to documentation-related tags. | "docs" and "reference" tags matched; "social" tag excluded | |
 
 ---
 

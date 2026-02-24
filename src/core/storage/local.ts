@@ -109,7 +109,7 @@ export function computeSnippetHash(url: string, snippetText?: string): string {
   return djb2(normUrl + "||" + normText);
 }
 
-export async function addPageBookmark(url: string, title: string, media?: BookmarkMedia, inputFolderId?: string): Promise<void> {
+export async function addPageBookmark(url: string, title: string, media?: BookmarkMedia, inputFolderId?: string, tags?: string[]): Promise<void> {
   const state = await getState();
   // Fall back to root if the requested folder no longer exists
   const folderId = (inputFolderId && state.folders[inputFolderId])
@@ -149,6 +149,7 @@ export async function addPageBookmark(url: string, title: string, media?: Bookma
     updatedAt: ts,
     snippetHash: hash,
     ...(media !== undefined ? { media } : {}),
+    ...(tags && tags.length > 0 ? { tags } : {}),
   };
 
   await setState(state);
@@ -161,6 +162,7 @@ export async function addSelectionBookmark(input: {
   contextBefore?: string;
   contextAfter?: string;
   folderId?: string;
+  tags?: string[];
   anchor?: {
     text: string;
     prefix?: string;
@@ -242,6 +244,7 @@ export async function addSelectionBookmark(input: {
     updatedAt: ts,
     snippetHash: hash,
     snippet,
+    ...(input.tags && input.tags.length > 0 ? { tags: input.tags } : {}),
   };
 
   await setState(state);
@@ -585,6 +588,55 @@ export async function bulkMoveBookmarks(ids: string[], targetFolderId: string): 
     }
   }
   await setState(state);
+}
+
+/** Set a reminder for multiple bookmarks in a single read-modify-write to avoid race conditions. */
+export async function bulkSetBookmarkReminder(ids: string[], reminderAt: number): Promise<void> {
+  if (ids.length === 0) return;
+  const state = await getState();
+  const ts = now();
+  for (const id of ids) {
+    const b = state.bookmarks[id];
+    if (b) {
+      b.reminderAt = reminderAt;
+      delete b.reminderSnoozedUntil;
+      b.updatedAt = ts;
+    }
+  }
+  await setState(state);
+}
+
+// ── Reminder functions ────────────────────────────────────────────────────────
+
+/** Set or clear a reminder on a bookmark. Passing null clears both reminderAt and reminderSnoozedUntil. */
+export async function setBookmarkReminder(bookmarkId: string, reminderAt: number | null): Promise<void> {
+  const state = await getState();
+  const b = state.bookmarks[bookmarkId];
+  if (!b) throw new Error(`Bookmark ${bookmarkId} not found`);
+  if (reminderAt == null) {
+    delete b.reminderAt;
+    delete b.reminderSnoozedUntil;
+  } else {
+    b.reminderAt = reminderAt;
+    delete b.reminderSnoozedUntil;
+  }
+  b.updatedAt = now();
+  await setState(state);
+}
+
+/** Snooze a reminder until a specific Unix ms timestamp. */
+export async function snoozeBookmarkReminder(bookmarkId: string, untilMs: number): Promise<void> {
+  const state = await getState();
+  const b = state.bookmarks[bookmarkId];
+  if (!b) throw new Error(`Bookmark ${bookmarkId} not found`);
+  b.reminderSnoozedUntil = untilMs;
+  b.updatedAt = now();
+  await setState(state);
+}
+
+/** Dismiss a reminder entirely (clears both reminderAt and reminderSnoozedUntil). */
+export async function dismissBookmarkReminder(bookmarkId: string): Promise<void> {
+  return setBookmarkReminder(bookmarkId, null);
 }
 
 export async function exportState(): Promise<LibraryState> {

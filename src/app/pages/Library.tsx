@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { getPrefs, setPrefs, type Prefs } from "../../core/storage/prefs";
-import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags } from "../../core/storage/local";
+import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder } from "../../core/storage/local";
+import { suggestTagIds } from "../../core/aiTags";
 import { getPendingSave, setPendingSave, updateRecents } from "../../core/storage/recents";
 import type { PendingSave } from "../../core/storage/recents";
 import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
@@ -22,7 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -184,7 +185,7 @@ function DroppableFolder({
               ? "bg-primary text-primary-foreground"
               : "bg-transparent text-foreground hover:bg-accent/50",
           )}
-          style={{ paddingLeft: `${8 + depth * 16}px`, paddingRight: 8 }}
+          style={{ paddingLeft: `${6 + depth * 6}px`, paddingRight: 8 }}
         >
           {!isRoot && hasChildren ? (
             <span
@@ -346,6 +347,7 @@ function SortableBookmarkItem({
   tagDefs,
   isDark,
   onToggleTags,
+  onSetReminder,
 }: {
   bookmark: Bookmark;
   onOpen: () => void;
@@ -365,6 +367,7 @@ function SortableBookmarkItem({
   tagDefs?: Record<string, TagDef>;
   isDark?: boolean;
   onToggleTags?: () => void;
+  onSetReminder?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
@@ -451,6 +454,7 @@ function SortableBookmarkItem({
           width={16}
           height={16}
           className="shrink-0 mt-0.5 rounded-sm"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
 
         <div className="flex-1 min-w-0">
@@ -503,6 +507,12 @@ function SortableBookmarkItem({
                 {folderName}
               </Badge>
             )}
+            {bookmark.reminderAt && (
+              <span className="inline-flex items-center gap-0.5 text-amber-500">
+                <Bell size={10} />
+                {reminderLabel(bookmark.reminderAt)}
+              </span>
+            )}
           </div>
 
           {snippetPreview && (
@@ -539,6 +549,20 @@ function SortableBookmarkItem({
           )}
         </div>
 
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "h-7 w-7 shrink-0 transition-opacity",
+            bookmark.reminderAt
+              ? "text-amber-500"
+              : "opacity-0 group-hover/card:opacity-100 text-muted-foreground"
+          )}
+          onClick={onSetReminder}
+          title={bookmark.reminderAt ? "Edit reminder" : "Set reminder"}
+        >
+          <Bell size={14} />
+        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 group-hover/card:opacity-100 transition-opacity">
@@ -549,6 +573,10 @@ function SortableBookmarkItem({
             <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleNote}>Notes</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleTags}>Tags</DropdownMenuItem>
+            <DropdownMenuItem onClick={onSetReminder}>
+              <Bell size={12} className="mr-1.5" />
+              {bookmark.reminderAt ? "Edit reminder" : "Set reminder"}
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -602,7 +630,7 @@ function RecentPins({ bookmarks, onOpen }: { bookmarks: Bookmark[]; onOpen: (b: 
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => onOpen(b)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/50 border border-border/50 rounded-full cursor-pointer text-xs text-foreground whitespace-nowrap shrink-0 max-w-52 shadow-sm hover:shadow-md hover:border-border transition-all"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/50 border border-border/50 rounded-full cursor-pointer text-xs text-foreground whitespace-nowrap shrink-0 max-w-72 shadow-sm hover:shadow-md hover:border-border transition-all"
                   >
                     <img
                       src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
@@ -610,6 +638,7 @@ function RecentPins({ bookmarks, onOpen }: { bookmarks: Bookmark[]; onOpen: (b: 
                       width={14}
                       height={14}
                       className="rounded-sm shrink-0"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
                     <span className="overflow-hidden text-ellipsis">
                       {truncate(b.name, 28)}
@@ -684,6 +713,7 @@ function PageGroupHeader({ group, expanded, onToggle }: {
         width={16}
         height={16}
         className="shrink-0"
+        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
       />
       <span className="flex-1 min-w-0 text-sm font-semibold text-foreground truncate">
         {group.title}
@@ -715,6 +745,94 @@ function getDescendantFolderIds(
   return result;
 }
 
+/* ─── Reminder helpers ──────────────────────────────────────────── */
+
+function isDue(b: Bookmark): boolean {
+  if (!b.reminderAt) return false;
+  if (b.reminderAt > Date.now()) return false;
+  if (b.reminderSnoozedUntil && b.reminderSnoozedUntil > Date.now()) return false;
+  return true;
+}
+
+function reminderLabel(reminderAt: number): string {
+  const diff = reminderAt - Date.now();
+  if (diff <= 0) return "Due now";
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return "Due today";
+  if (days === 1) return "Due tomorrow";
+  return `Due in ${days}d`;
+}
+
+/* ─── RemindersSection ──────────────────────────────────────────── */
+
+function RemindersSection({
+  bookmarks,
+  onDismiss,
+  onSnooze,
+  collapsed,
+  onToggleCollapse,
+}: {
+  bookmarks: Bookmark[];
+  onDismiss: (id: string) => void;
+  onSnooze: (id: string, days: number) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+}) {
+  return (
+    <div className="mb-4 rounded-lg border border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-700/40 overflow-hidden">
+      <button
+        onClick={onToggleCollapse}
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-100/50 dark:hover:bg-amber-900/20 transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <Bell size={14} />
+          Reminders ({bookmarks.length})
+        </span>
+        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+      </button>
+      {!collapsed && (
+        <div className="divide-y divide-amber-200/40 dark:divide-amber-800/30">
+          {bookmarks.map((b) => (
+            <div key={b.id} className="flex items-center gap-2 px-3 py-2">
+              <img
+                src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
+                alt=""
+                className="w-4 h-4 shrink-0 rounded-sm"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-foreground truncate">{b.name}</div>
+                <div className="text-[10px] text-muted-foreground truncate">{b.domain}</div>
+              </div>
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0">{reminderLabel(b.reminderAt!)}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground"
+                onClick={() => onDismiss(b.id)}
+              >
+                Dismiss
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-6 text-xs px-2">
+                    Snooze ▾
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onSnooze(b.id, 1)}>Tomorrow</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onSnooze(b.id, 3)}>In 3 days</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onSnooze(b.id, 7)}>In 1 week</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── TagEditor ─────────────────────────────────────────────────── */
 
 function TagEditor({
@@ -723,16 +841,30 @@ function TagEditor({
   isDark,
   onSave,
   onClose,
+  bookmarkUrl,
+  bookmarkName,
 }: {
   currentTagIds: string[];
   tagDefs: Record<string, TagDef>;
   isDark?: boolean;
   onSave: (ids: string[]) => void;
   onClose: () => void;
+  bookmarkUrl?: string;
+  bookmarkName?: string;
 }) {
   const [input, setInput] = useState("");
   const [ids, setIds] = useState<string[]>(currentTagIds);
+  const [aiSuggestedIds, setAiSuggestedIds] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!bookmarkUrl && !bookmarkName) return;
+    suggestTagIds(
+      { url: bookmarkUrl ?? "", title: bookmarkName ?? "" },
+      tagDefs
+    ).then(setAiSuggestedIds);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const query = input.trim().toLowerCase();
   const allTags = Object.values(tagDefs).sort((a, b) => a.name.localeCompare(b.name));
@@ -797,34 +929,69 @@ function TagEditor({
           className="flex-1 min-w-20 bg-transparent border-none outline-none text-xs text-foreground placeholder:text-muted-foreground"
         />
       </div>
-      {(suggestions.length > 0 || (query && !exactMatch)) && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {suggestions.map((tag) => {
-            const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
-            const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
-            return (
-              <button
-                key={tag.id}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); addTag(tag.id); }}
-                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors hover:bg-accent"
-                style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : undefined}
-              >
-                + #{tag.name}
-              </button>
-            );
-          })}
-          {query && !exactMatch && (
-            <button
-              type="button"
-              onMouseDown={async (e) => { e.preventDefault(); const id = await createTag(query); addTag(id); }}
-              className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-dashed border-primary/50 text-primary hover:bg-primary/10 transition-colors"
-            >
-              + Create &ldquo;{query}&rdquo;
-            </button>
-          )}
-        </div>
-      )}
+      {(() => {
+        const suggestedChips = suggestions.filter((t) => aiSuggestedIds.includes(t.id));
+        const otherChips = suggestions.filter((t) => !aiSuggestedIds.includes(t.id));
+        const showCreate = !!(query && !exactMatch);
+        if (suggestions.length === 0 && !showCreate) return null;
+        return (
+          <>
+            {suggestedChips.length > 0 && (
+              <div className="pt-1">
+                <span className="text-[10px] text-muted-foreground mb-1.5 block">✦ Suggested</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {suggestedChips.map((tag) => {
+                    const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                    const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); addTag(tag.id); }}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors hover:bg-accent"
+                        style={{
+                          ...(colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : {}),
+                          boxShadow: colorHex ? `0 0 0 1.5px ${colorHex}` : "0 0 0 1.5px var(--primary)",
+                        }}
+                      >
+                        + #{tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {(otherChips.length > 0 || showCreate) && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {otherChips.map((tag) => {
+                  const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                  const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                  return (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onMouseDown={(e) => { e.preventDefault(); addTag(tag.id); }}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors hover:bg-accent"
+                      style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : undefined}
+                    >
+                      + #{tag.name}
+                    </button>
+                  );
+                })}
+                {showCreate && (
+                  <button
+                    type="button"
+                    onMouseDown={async (e) => { e.preventDefault(); const id = await createTag(query); addTag(id); }}
+                    className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-dashed border-primary/50 text-primary hover:bg-primary/10 transition-colors"
+                  >
+                    + Create &ldquo;{query}&rdquo;
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        );
+      })()}
       <div className="flex justify-end">
         <Button size="sm" variant="ghost" onClick={onClose} className="h-6 text-xs px-2">Done</Button>
       </div>
@@ -883,17 +1050,21 @@ type BookmarkListProps = {
   tagDefs: Record<string, TagDef>;
   onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
   isDark?: boolean;
+  onSetReminder?: (bookmarkId: string, bookmarkName: string, currentReminderAt?: number) => void;
+  searchScopedToFolder?: boolean;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSetReminder, searchScopedToFolder }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
 
-  const activeIds = isSearching ? null : getDescendantFolderIds(activeFolderId, folders);
+  const activeIds = (isSearching && !searchScopedToFolder)
+    ? null
+    : getDescendantFolderIds(activeFolderId, folders);
 
   const filtered = sortBookmarks(
-    bookmarks.filter((b) => isSearching || activeIds!.has(b.folderId)),
+    bookmarks.filter((b) => (isSearching && !searchScopedToFolder) || activeIds!.has(b.folderId)),
     sortBy,
   );
 
@@ -988,6 +1159,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
         tagDefs={tagDefs}
         isDark={isDark}
         onToggleTags={() => setExpandedTags((prev) => ({ ...prev, [b.id]: !prev[b.id] }))}
+        onSetReminder={onSetReminder ? () => onSetReminder(b.id, b.name, b.reminderAt) : undefined}
       />
       {expandedTags[b.id] && (
         <TagEditor
@@ -996,6 +1168,8 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
           isDark={isDark}
           onSave={(ids) => onSetBookmarkTags(b.id, ids)}
           onClose={() => setExpandedTags((prev) => ({ ...prev, [b.id]: false }))}
+          bookmarkUrl={b.url}
+          bookmarkName={b.name}
         />
       )}
     </div>
@@ -1003,12 +1177,12 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
   if (filtered.length === 0) {
     return (
-      <div>
-        <h3 className="mt-0 text-base font-semibold tracking-tight text-foreground">
-          {isSearching ? "Search results (0)" : "Bookmarks (0)"}
+      <div className="flex flex-col items-center justify-center h-full py-24 text-center">
+        <h3 className="text-base font-semibold text-foreground">
+          {isSearching ? "No results" : "No bookmarks here"}
         </h3>
-        <p className="text-sm text-muted-foreground py-5">
-          {isSearching ? "No matching bookmarks found." : "No bookmarks in this folder."}
+        <p className="text-sm text-muted-foreground mt-1">
+          {isSearching ? "No matching bookmarks found." : "No bookmarks in this folder yet."}
         </p>
       </div>
     );
@@ -1064,9 +1238,11 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
+function TopBar({ searchQuery, onSearchChange, searchWithinFolder, onToggleSearchWithinFolder, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
   searchQuery: string;
   onSearchChange: (q: string) => void;
+  searchWithinFolder: boolean;
+  onToggleSearchWithinFolder: () => void;
   onCreateFolder: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -1085,6 +1261,23 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
         onChange={(e) => onSearchChange(e.target.value)}
         className="flex-1 min-w-50 h-9"
       />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleSearchWithinFolder}
+        className={cn(
+          "h-9 shrink-0 gap-1.5",
+          searchWithinFolder
+            ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
+            : "w-9 px-0 text-muted-foreground hover:text-foreground"
+        )}
+        title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
+      >
+        <FolderSearch size={16} />
+        {searchWithinFolder && (
+          <span className="text-xs font-medium">Current folder</span>
+        )}
+      </Button>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -1143,13 +1336,14 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
 
 /* ─── BulkActionsBar ───────────────────────────────────────────── */
 
-function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, onMove }: {
+function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, onMove, onBulkReminder }: {
   count: number;
   folders: Record<string, import("../../core/types").Folder>;
   onSelectAll: () => void;
   onDeselectAll: () => void;
   onDelete: () => void;
   onMove: (targetFolderId: string) => void;
+  onBulkReminder?: (days: number) => void;
 }) {
   const [showFolderPicker, setShowFolderPicker] = useState(false);
 
@@ -1185,6 +1379,21 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
           </div>
         )}
       </div>
+      {onBulkReminder && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Bell size={13} />
+              Remind
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onClick={() => onBulkReminder(1)}>Tomorrow</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onBulkReminder(3)}>In 3 days</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onBulkReminder(7)}>In 1 week</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <Button variant="destructive" size="sm" onClick={onDelete}>
         <Trash2 size={14} />
         Delete
@@ -1267,6 +1476,7 @@ export default function Library() {
   const [state, setState] = useState<LibraryState | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchWithinFolder, setSearchWithinFolder] = useState(false);
   const [isFolderModalOpen, setFolderModalOpen] = useState(false);
   const [folderNameDraft, setFolderNameDraft] = useState("");
   const [expandedNotes, setExpandedNotes] = useState<Record<string, { open: boolean; draft: string }>>({});
@@ -1286,18 +1496,28 @@ export default function Library() {
     currentName: string;
     onConfirm: (name: string) => void;
   } | null>(null);
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [sidebarWidth, setSidebarWidth] = useState(276);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [tagsExpanded, setTagsExpanded] = useState(true);
-  const [prefs, setPrefsState] = useState<Prefs>({ highlightDurationMs: 3000, snippetDismissMs: 12000 });
-  const [prefsDraft, setPrefsDraft] = useState<Prefs>({ highlightDurationMs: 3000, snippetDismissMs: 12000 });
+  const defaultPrefs: Prefs = { highlightDurationMs: 3000, snippetDismissMs: 12000, reminderNotificationEnabled: false, reminderNotificationHour: 9 };
+  const [prefs, setPrefsState] = useState<Prefs>(defaultPrefs);
+  const [prefsDraft, setPrefsDraft] = useState<Prefs>(defaultPrefs);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingDivider = useRef(false);
 
   const isPickerMode = new URLSearchParams(window.location.search).get("mode") === "picker";
   const [pendingSave, setPendingSaveState] = useState<PendingSave | null>(null);
+  const [pickerSuggestedIds, setPickerSuggestedIds] = useState<string[]>([]);
+  const [pickerTagIds, setPickerTagIds] = useState<string[]>([]);
+  const [remindersCollapsed, setRemindersCollapsed] = useState(false);
+  const [reminderDialog, setReminderDialog] = useState<{
+    bookmarkId: string;
+    bookmarkName: string;
+    currentReminderAt?: number;
+  } | null>(null);
+  const [reminderDateDraft, setReminderDateDraft] = useState("");
 
   useEffect(() => {
     getPrefs().then((p) => { setPrefsState(p); setPrefsDraft(p); });
@@ -1328,6 +1548,15 @@ export default function Library() {
     if (!isPickerMode) return;
     getPendingSave().then((p) => setPendingSaveState(p));
   }, [isPickerMode]);
+
+  useEffect(() => {
+    if (!pendingSave || !state) return;
+    suggestTagIds(
+      { url: pendingSave.url, title: pendingSave.title, snippet: pendingSave.selectionText },
+      state.tagDefs ?? {}
+    ).then(setPickerSuggestedIds);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSave?.id, state?.schemaVersion]);
 
   // Global ? shortcut for shortcuts cheat-sheet
   useEffect(() => {
@@ -1438,6 +1667,7 @@ export default function Library() {
 
   const currentFolderId = activeFolderId ?? state.rootFolderId;
   const allBookmarks = Object.values(state.bookmarks);
+  const dueBookmarks = allBookmarks.filter(isDue);
 
   const sortedTagDefs = Object.values(state.tagDefs ?? {}).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1520,6 +1750,7 @@ export default function Library() {
   const handlePickerSave = async (folderId: string) => {
     if (!pendingSave) return;
     try {
+      const tags = pickerTagIds.length > 0 ? pickerTagIds : undefined;
       if (pendingSave.selectionText) {
         await addSelectionBookmark({
           url: pendingSave.url,
@@ -1527,6 +1758,7 @@ export default function Library() {
           selectedText: pendingSave.selectionText,
           anchor: pendingSave.anchor,
           folderId,
+          tags,
         });
       } else if (pendingSave.ytResult?.kind === "youtube") {
         const media = {
@@ -1538,9 +1770,9 @@ export default function Library() {
           openUrl: pendingSave.ytResult.openUrl,
           captureMethod: pendingSave.ytResult.captureMethod,
         };
-        await addPageBookmark(pendingSave.ytResult.openUrl, pendingSave.title, media, folderId);
+        await addPageBookmark(pendingSave.ytResult.openUrl, pendingSave.title, media, folderId, tags);
       } else {
-        await addPageBookmark(pendingSave.url, pendingSave.title, undefined, folderId);
+        await addPageBookmark(pendingSave.url, pendingSave.title, undefined, folderId, tags);
       }
 
       await updateRecents(folderId);
@@ -1636,6 +1868,57 @@ export default function Library() {
     } catch (err) {
       console.error("Failed to delete tag", err);
       showToast("Failed to delete tag", "error");
+    }
+  };
+
+  const handleDismissReminder = async (bookmarkId: string) => {
+    try {
+      await dismissBookmarkReminder(bookmarkId);
+      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to dismiss reminder", err);
+    }
+  };
+
+  const handleSnoozeReminder = async (bookmarkId: string, days: number) => {
+    try {
+      const untilMs = Date.now() + days * 24 * 60 * 60 * 1000;
+      await snoozeBookmarkReminder(bookmarkId, untilMs);
+      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to snooze reminder", err);
+    }
+  };
+
+  const handleBulkSetReminder = async (days: number) => {
+    try {
+      const untilMs = Date.now() + days * 24 * 60 * 60 * 1000;
+      await bulkSetBookmarkReminder([...selectedIds], untilMs);
+      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
+      setSelectedIds(new Set());
+      setBulkMode(false);
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to set bulk reminder", err);
+    }
+  };
+
+  const handleSaveReminder = async (bookmarkId: string, dateStr: string) => {
+    try {
+      const ms = dateStr ? new Date(dateStr).getTime() : null;
+      if (ms && !isNaN(ms)) {
+        await setBookmarkReminder(bookmarkId, ms);
+      } else {
+        await setBookmarkReminder(bookmarkId, null);
+      }
+      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
+      await refreshState();
+      setReminderDialog(null);
+      setReminderDateDraft("");
+    } catch (err) {
+      console.error("Failed to save reminder", err);
     }
   };
 
@@ -1761,8 +2044,8 @@ export default function Library() {
 
   return (
     <>
-      <div className="h-screen w-screen bg-background flex justify-center items-start p-4">
-        <div className="w-215 max-w-[96vw] h-[92vh] border border-border rounded-xl overflow-hidden bg-card shadow-lg">
+      <div className="h-screen w-screen bg-background">
+        <div className="w-full h-screen overflow-hidden bg-card flex flex-col">
           {/* Header */}
           <div className="sticky top-0 z-10 bg-card border-b border-border p-3">
             <div className="flex items-center justify-between gap-3">
@@ -1795,6 +2078,8 @@ export default function Library() {
                 <TopBar
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
+                  searchWithinFolder={searchWithinFolder}
+                  onToggleSearchWithinFolder={() => setSearchWithinFolder((v) => !v)}
                   onCreateFolder={handleCreateFolder}
                   onExport={handleExport}
                   onImport={handleImport}
@@ -1838,16 +2123,44 @@ export default function Library() {
 
           {/* Picker mode banner */}
           {isPickerMode && pendingSave && (
-            <div className="px-4 py-2.5 bg-primary/10 border-b border-primary/20 flex items-center gap-3">
-              <span className="text-sm font-medium text-primary shrink-0">Saving to\u2026</span>
-              <span className="text-sm text-foreground truncate flex-1">{pendingSave.title || pendingSave.url}</span>
-              <Button size="sm" variant="ghost" onClick={() => window.close()}>Cancel</Button>
+            <div className="px-4 py-2.5 bg-primary/10 border-b border-primary/20">
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium text-primary shrink-0">Saving to\u2026</span>
+                <span className="text-sm text-foreground truncate flex-1">{pendingSave.title || pendingSave.url}</span>
+                <Button size="sm" variant="ghost" onClick={() => window.close()}>Cancel</Button>
+              </div>
+              {pickerSuggestedIds.length > 0 && state?.tagDefs && (
+                <div className="flex flex-wrap gap-1 mt-1.5 items-center">
+                  <span className="text-[10px] text-muted-foreground mr-0.5">Suggested:</span>
+                  {pickerSuggestedIds.map((id) => {
+                    const tag = state.tagDefs![id];
+                    if (!tag) return null;
+                    const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                    const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                    const selected = pickerTagIds.includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setPickerTagIds((p) => selected ? p.filter((x) => x !== id) : [...p, id])}
+                        className={cn(
+                          "inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border transition-colors",
+                          selected ? "ring-1 ring-primary" : "opacity-70 hover:opacity-100"
+                        )}
+                        style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + (selected ? "30" : "15") } : undefined}
+                      >
+                        {selected ? "\u2713" : "+"} #{tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* Two-column body */}
-          <div ref={containerRef} className="flex" style={{ height: "calc(92vh - 110px)" }}>
-            <div className="flex-shrink-0 p-3 overflow-y-auto bg-sidebar" style={{ width: sidebarWidth }}>
+          <div ref={containerRef} className="flex flex-1 min-h-0">
+            <div className="shrink-0 p-3 overflow-y-auto bg-sidebar" style={{ width: sidebarWidth }}>
               <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2.5">Folders</div>
               <FolderTree
                 state={state}
@@ -1862,12 +2175,12 @@ export default function Library() {
                 }
               />
               {/* Tags section */}
-              <div className="mt-4 px-2">
+              <div className="mt-4 pt-4 border-t border-border px-2">
                 <button
                   onClick={() => setTagsExpanded((v) => !v)}
                   className="flex items-center gap-1.5 w-full text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 hover:text-foreground transition-colors"
                 >
-                  {tagsExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                  {tagsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                   Tags
                 </button>
                 {tagsExpanded && (
@@ -1915,10 +2228,19 @@ export default function Library() {
             {/* Drag divider */}
             <div
               onMouseDown={(e) => { isDraggingDivider.current = true; e.preventDefault(); }}
-              className="w-1.5 flex-shrink-0 border-r border-border cursor-col-resize hover:bg-primary/20 transition-colors"
+              className="w-1.5 shrink-0 border-r border-border cursor-col-resize hover:bg-primary/20 transition-colors"
               title="Drag to resize"
             />
             <div className="flex-1 min-w-0 p-4 overflow-y-auto bg-background">
+              {!isSearching && dueBookmarks.length > 0 && (
+                <RemindersSection
+                  bookmarks={dueBookmarks}
+                  onDismiss={handleDismissReminder}
+                  onSnooze={handleSnoozeReminder}
+                  collapsed={remindersCollapsed}
+                  onToggleCollapse={() => setRemindersCollapsed((v) => !v)}
+                />
+              )}
               {!isSearching && <RecentPins bookmarks={allBookmarks} onOpen={handleOpenBookmark} />}
               {activeTagFilter && state.tagDefs?.[activeTagFilter] && (
                 <div className="flex items-center gap-2 mb-2 px-1">
@@ -1956,6 +2278,8 @@ export default function Library() {
                 tagDefs={state.tagDefs ?? {}}
                 onSetBookmarkTags={handleSetBookmarkTags}
                 isDark={isDark}
+                onSetReminder={(id, name, curr) => setReminderDialog({ bookmarkId: id, bookmarkName: name, currentReminderAt: curr })}
+                searchScopedToFolder={searchWithinFolder}
               />
             </div>
           </div>
@@ -1996,6 +2320,7 @@ export default function Library() {
                 showToast("Failed to move bookmarks", "error");
               }
             }}
+            onBulkReminder={handleBulkSetReminder}
           />
         )}
 
@@ -2092,6 +2417,33 @@ export default function Library() {
                 />
                 <p className="text-xs text-muted-foreground">How long the save-snippet card stays visible on AI pages (5–30 s).</p>
               </div>
+              <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-sm font-medium">Reminders</p>
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={prefsDraft.reminderNotificationEnabled}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, reminderNotificationEnabled: e.target.checked }))}
+                    className="cursor-pointer"
+                  />
+                  Daily reminder notification
+                </label>
+                {prefsDraft.reminderNotificationEnabled && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground pl-5">
+                    Notify at:
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={prefsDraft.reminderNotificationHour}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, reminderNotificationHour: Math.min(23, Math.max(0, Number(e.target.value))) }))}
+                      className="w-14 border border-border rounded px-1.5 py-0.5 bg-background text-foreground text-center"
+                    />
+                    :00
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">When enabled, ZeroPin sends one daily OS notification if you have due reminders. The Reminders section in the library is always available regardless of this setting.</p>
+              </div>
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <Button variant="outline" onClick={() => setSettingsOpen(false)}>Cancel</Button>
@@ -2125,6 +2477,66 @@ export default function Library() {
                   <span className="text-muted-foreground">{desc}</span>
                 </div>
               ))}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Reminder dialog */}
+        <Dialog open={!!reminderDialog} onOpenChange={(open) => { if (!open) { setReminderDialog(null); setReminderDateDraft(""); } }}>
+          <DialogContent className="sm:max-w-sm overflow-y-auto max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>Set reminder</DialogTitle>
+              <DialogDescription className="truncate">{reminderDialog?.bookmarkName}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: "Tomorrow", days: 1 },
+                  { label: "In 3 days", days: 3 },
+                  { label: "In 1 week", days: 7 },
+                ].map(({ label, days }) => (
+                  <Button
+                    key={days}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const d = new Date(Date.now() + days * 86400000);
+                      setReminderDateDraft(d.toISOString().slice(0, 10));
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              <input
+                type="date"
+                value={reminderDateDraft}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setReminderDateDraft(e.target.value)}
+                className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+              />
+            </div>
+            <div className="flex justify-between mt-2">
+              {reminderDialog?.currentReminderAt && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => reminderDialog && handleSaveReminder(reminderDialog.bookmarkId, "")}
+                >
+                  Remove reminder
+                </Button>
+              )}
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" size="sm" onClick={() => { setReminderDialog(null); setReminderDateDraft(""); }}>Cancel</Button>
+                <Button
+                  size="sm"
+                  disabled={!reminderDateDraft}
+                  onClick={() => reminderDialog && handleSaveReminder(reminderDialog.bookmarkId, reminderDateDraft)}
+                >
+                  Save
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

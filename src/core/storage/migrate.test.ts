@@ -177,4 +177,22 @@ describe("migrateState", () => {
     const result = migrateState(raw);
     expect((result.bookmarks["b1"] as any).tags).toEqual(["tag1"]);
   });
+
+  it("v8 state → schemaVersion becomes 9; reminder fields absent (optional)", () => {
+    const raw = {
+      schemaVersion: 8,
+      rootFolderId: "root",
+      folders: {
+        root: { id: "root", parentId: null, name: "ZeroPin", sortKey: "m", createdAt: 1000, updatedAt: 1000 },
+      },
+      bookmarks: {
+        b1: { id: "b1", folderId: "root", type: "PAGE", name: "Example", url: "https://example.com", domain: "example.com", sortKey: "1", createdAt: 1000, updatedAt: 1000, tags: [] },
+      },
+      tagDefs: {},
+    };
+    const result = migrateState(raw);
+    expect(result.schemaVersion).toBe(9);
+    expect((result.bookmarks["b1"] as any).reminderAt).toBeUndefined();
+    expect((result.bookmarks["b1"] as any).reminderSnoozedUntil).toBeUndefined();
+  });
 });

@@ -12,11 +12,15 @@ import {
   Scissors,
   Search,
   FolderOpen,
+  Tag,
+  Bell,
+  CalendarDays,
+  FolderSearch,
 } from "lucide-react";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
-type ScenarioId = "save-page" | "save-snippet" | "open-highlight" | "organize";
+type ScenarioId = "save-page" | "save-snippet" | "open-highlight" | "organize" | "tags-reminders";
 
 interface Step {
   description: string;
@@ -104,8 +108,27 @@ const scenarios: Scenario[] = [
         instruction: "Drag a bookmark onto a folder to move it there.",
       },
       {
-        description: "Create new folders, rename items, add notes, and use the menu for more actions.",
-        instruction: "Use Export/Import to back up your library, and toggle dark mode with the sun/moon button.",
+        description: "Create folders, rename items, add notes, tag bookmarks, and set reminders — all from the ⋮ menu.",
+        instruction: "Use Export/Import to back up your library. Toggle dark/light/system theme with the theme button.",
+      },
+    ],
+  },
+  {
+    id: "tags-reminders",
+    title: "Tags & Reminders",
+    icon: <Tag size={14} />,
+    steps: [
+      {
+        description: "Hover any bookmark card to reveal the bell icon. Click it to set a reminder for when you want to revisit.",
+        instruction: "Due reminders surface at the top of the Library so nothing gets buried.",
+      },
+      {
+        description: "Tags let you organise bookmarks across folders. Smart suggestions appear based on the page domain (GitHub → 'dev', YouTube → 'video').",
+        instruction: "Click a tag in the sidebar to filter all bookmarks by that tag. Click again to clear.",
+      },
+      {
+        description: "The filter bar narrows results by source (Web, AI Answers, AI Prompts), date added range, or folder scope.",
+        instruction: "Use the FolderSearch toggle to scope search to the current folder, the Source dropdown, or the date picker.",
       },
     ],
   },
@@ -189,12 +212,27 @@ function FakeArticlePage({
   );
 }
 
-function FakeLibraryView({ highlightSnippet }: { highlightSnippet?: boolean }) {
+function FakeLibraryView({
+  highlightSnippet,
+  showBell,
+  activeTag,
+  showFilterBar,
+}: {
+  highlightSnippet?: boolean;
+  showBell?: boolean;
+  activeTag?: string;
+  showFilterBar?: boolean;
+}) {
   const fakeFolders = [
     { name: "ZeroPin", active: false, depth: 0 },
     { name: "Inbox", active: true, depth: 1 },
     { name: "Research", active: false, depth: 1 },
     { name: "Tutorials", active: false, depth: 1 },
+  ];
+
+  const fakeTags = [
+    { name: "dev", active: activeTag === "dev" },
+    { name: "css", active: activeTag === "css" },
   ];
 
   const fakeBookmarks = [
@@ -204,83 +242,132 @@ function FakeLibraryView({ highlightSnippet }: { highlightSnippet?: boolean }) {
       isSnippet: true,
       snippet: "One of the most impactful changes has been the adoption of component-based architectures\u2026",
       time: "2h ago",
+      tag: "dev",
     },
     {
       name: "React Performance Tips",
       domain: "react.dev",
       isSnippet: false,
       time: "1d ago",
+      tag: "dev",
     },
     {
       name: "CSS Grid Layout Guide",
       domain: "css-tricks.com",
       isSnippet: false,
       time: "3d ago",
+      tag: "css",
     },
   ];
 
-  return (
-    <div className="flex h-full font-sans">
-      {/* Sidebar */}
-      <div className="w-40 border-r border-border/50 p-2 bg-sidebar">
-        <div className="text-[10px] font-bold text-muted-foreground mb-1.5">Folders</div>
-        {fakeFolders.map((f) => (
-          <div
-            key={f.name}
-            className={cn(
-              "py-0.5 text-[11px] rounded-sm mb-px",
-              f.active ? "bg-primary text-primary-foreground" : "text-foreground"
-            )}
-            style={{ paddingLeft: 6 + f.depth * 12, paddingRight: 6 }}
-          >
-            <FolderOpen size={10} className="inline mr-1 -mt-px" />
-            {f.name}
-          </div>
-        ))}
-      </div>
+  const visibleBookmarks = activeTag
+    ? fakeBookmarks.filter((b) => b.tag === activeTag)
+    : fakeBookmarks;
 
-      {/* Bookmarks */}
-      <div className="flex-1 p-2.5 overflow-y-auto bg-background">
-        <div className="text-xs font-bold text-foreground mb-2">
-          Bookmarks ({fakeBookmarks.length})
+  return (
+    <div className="flex flex-col h-full font-sans">
+      {/* Filter bar */}
+      {showFilterBar && (
+        <div className="flex gap-1.5 items-center px-2 py-1.5 border-b border-border/50 bg-card shrink-0">
+          <div className={cn(
+            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px]",
+            "bg-primary/10 text-primary"
+          )}>
+            <FolderSearch size={9} />
+            <span>Current folder</span>
+          </div>
+          <div className="flex items-center gap-0.5 border border-border/60 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground">
+            All ▾
+          </div>
+          <div className="flex items-center gap-0.5 border border-border/60 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground">
+            <CalendarDays size={9} />
+          </div>
+          <div className="flex items-center gap-0.5 border border-border/60 rounded px-1.5 py-0.5 text-[9px] text-muted-foreground">
+            Newest ▾
+          </div>
         </div>
-        {fakeBookmarks.map((b, i) => (
-          <div
-            key={i}
-            className={cn(
-              "p-2 mb-1.5 bg-card border rounded-md transition-shadow",
-              b.isSnippet ? "border-l-2 border-l-snippet" : "border-border/50",
-              highlightSnippet && i === 0 && "ring-2 ring-primary/25"
-            )}
-            style={{ cursor: highlightSnippet && i === 0 ? "pointer" : "default" }}
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground text-[11px]">&#x22ee;&#x22ee;</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <span className="text-[11px] font-semibold text-primary truncate">
-                    {b.name}
-                  </span>
-                  {b.isSnippet && (
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-auto border-snippet text-snippet shrink-0">
-                      snippet
-                    </Badge>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className="w-40 border-r border-border/50 p-2 bg-sidebar overflow-y-auto">
+          <div className="text-[10px] font-bold text-muted-foreground mb-1.5">Folders</div>
+          {fakeFolders.map((f) => (
+            <div
+              key={f.name}
+              className={cn(
+                "py-0.5 text-[11px] rounded-sm mb-px",
+                f.active ? "bg-primary text-primary-foreground" : "text-foreground"
+              )}
+              style={{ paddingLeft: 6 + f.depth * 12, paddingRight: 6 }}
+            >
+              <FolderOpen size={10} className="inline mr-1 -mt-px" />
+              {f.name}
+            </div>
+          ))}
+          <div className="mt-2 pt-2 border-t border-border/50">
+            <div className="text-[10px] font-bold text-muted-foreground mb-1.5">Tags</div>
+            {fakeTags.map((t) => (
+              <div
+                key={t.name}
+                className={cn(
+                  "py-0.5 px-1.5 text-[10px] rounded-sm mb-px flex items-center gap-1",
+                  t.active ? "bg-primary/10 text-primary font-semibold" : "text-foreground"
+                )}
+              >
+                <Tag size={8} />
+                #{t.name}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Bookmarks */}
+        <div className="flex-1 p-2.5 overflow-y-auto bg-background">
+          <div className="text-xs font-bold text-foreground mb-2">
+            Bookmarks ({visibleBookmarks.length})
+          </div>
+          {visibleBookmarks.map((b, i) => (
+            <div
+              key={i}
+              className={cn(
+                "p-2 mb-1.5 bg-card border rounded-md transition-shadow",
+                b.isSnippet ? "border-l-2 border-l-snippet" : "border-border/50",
+                highlightSnippet && i === 0 && "ring-2 ring-primary/25"
+              )}
+              style={{ cursor: highlightSnippet && i === 0 ? "pointer" : "default" }}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground text-[11px]">&#x22ee;&#x22ee;</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[11px] font-semibold text-primary truncate">
+                      {b.name}
+                    </span>
+                    {b.isSnippet && (
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-auto border-snippet text-snippet shrink-0">
+                        snippet
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground flex gap-1.5">
+                    <span>{b.domain}</span>
+                    <span>{b.time}</span>
+                  </div>
+                  {b.snippet && (
+                    <div className="text-[10px] text-muted-foreground italic mt-0.5 truncate">
+                      &ldquo;{b.snippet}&rdquo;
+                    </div>
                   )}
                 </div>
-                <div className="text-[10px] text-muted-foreground flex gap-1.5">
-                  <span>{b.domain}</span>
-                  <span>{b.time}</span>
-                </div>
-                {b.snippet && (
-                  <div className="text-[10px] text-muted-foreground italic mt-0.5 truncate">
-                    &ldquo;{b.snippet}&rdquo;
-                  </div>
+                {showBell && i === 0 && (
+                  <Bell size={11} className="text-amber-500 shrink-0" />
                 )}
+                <span className="text-muted-foreground text-[13px]">&#x22ee;</span>
               </div>
-              <span className="text-muted-foreground text-[13px]">&#x22ee;</span>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -352,7 +439,7 @@ function BrowserMockup({
   const showToast =
     (sid === "save-page" && step === 2) ||
     (sid === "save-snippet" && step === 2);
-  const showLibrary = sid === "open-highlight" || sid === "organize";
+  const showLibrary = sid === "open-highlight" || sid === "organize" || sid === "tags-reminders";
   const showArticleInHighlight = sid === "open-highlight" && step >= 1;
 
   const contextMenuItems =
@@ -396,7 +483,12 @@ function BrowserMockup({
         onClick={!isLastStep ? onAdvance : undefined}
       >
         {showLibrary && !showArticleInHighlight ? (
-          <FakeLibraryView highlightSnippet={sid === "open-highlight" && step === 0} />
+          <FakeLibraryView
+            highlightSnippet={sid === "open-highlight" && step === 0}
+            showBell={sid === "tags-reminders" && step === 0}
+            activeTag={sid === "tags-reminders" && step === 1 ? "dev" : undefined}
+            showFilterBar={sid === "tags-reminders" && step === 2}
+          />
         ) : (
           <FakeArticlePage showSelection={showSelection} showHighlight={showHighlight} />
         )}

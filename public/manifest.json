@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "description": "Local-first bookmark and snippet manager for web pages and AI chats.",
   "permissions": ["contextMenus", "storage", "tabs", "activeTab", "clipboardWrite", "alarms", "notifications"],
+  "host_permissions": ["*://*/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

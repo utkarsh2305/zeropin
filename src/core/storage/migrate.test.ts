@@ -178,7 +178,7 @@ describe("migrateState", () => {
     expect((result.bookmarks["b1"] as any).tags).toEqual(["tag1"]);
   });
 
-  it("v8 state → schemaVersion becomes 9; reminder fields absent (optional)", () => {
+  it("v8 state → schemaVersion becomes 10; reminder and dead-link fields absent (optional)", () => {
     const raw = {
       schemaVersion: 8,
       rootFolderId: "root",
@@ -191,8 +191,10 @@ describe("migrateState", () => {
       tagDefs: {},
     };
     const result = migrateState(raw);
-    expect(result.schemaVersion).toBe(9);
+    expect(result.schemaVersion).toBe(10);
     expect((result.bookmarks["b1"] as any).reminderAt).toBeUndefined();
     expect((result.bookmarks["b1"] as any).reminderSnoozedUntil).toBeUndefined();
+    expect((result.bookmarks["b1"] as any).isDeadLink).toBeUndefined();
+    expect((result.bookmarks["b1"] as any).deadLinkCheckedAt).toBeUndefined();
   });
 });

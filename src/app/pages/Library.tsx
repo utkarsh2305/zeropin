@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { getPrefs, setPrefs, type Prefs } from "../../core/storage/prefs";
-import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder } from "../../core/storage/local";
+import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder, updateDeadLinkResults } from "../../core/storage/local";
 import { suggestTagIds } from "../../core/aiTags";
 import { getPendingSave, setPendingSave, updateRecents } from "../../core/storage/recents";
 import type { PendingSave } from "../../core/storage/recents";
@@ -24,7 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -70,6 +70,106 @@ const FOLDER_COLORS: Record<string, { light: string; dark: string } | null> = {
   white:  { light: "#9ca3af", dark: "#f9fafb" },
 };
 
+/* ─── HealthDashboard ───────────────────────────────────────────── */
+
+type DashboardFilter = "unread" | "deadlinks" | "emptyfolders";
+
+function HealthDashboard({
+  unreadCount,
+  deadCount,
+  emptyCount,
+  deadLinkChecking,
+  deadLinkProgress,
+  deadLinkTotal,
+  activeFilter,
+  unreadThreshold,
+  onUnreadClick,
+  onDeadLinksClick,
+  onEmptyFoldersClick,
+}: {
+  unreadCount: number;
+  deadCount: number;
+  emptyCount: number;
+  deadLinkChecking: boolean;
+  deadLinkProgress: number;
+  deadLinkTotal: number;
+  activeFilter: DashboardFilter | null;
+  unreadThreshold: number;
+  onUnreadClick: () => void;
+  onDeadLinksClick: () => void;
+  onEmptyFoldersClick: () => void;
+}) {
+  const hasOtherChips = unreadCount > 0 || emptyCount > 0;
+  if (!hasOtherChips && !deadLinkChecking && deadCount === 0) {
+    // Dead links chip always shown — it's the trigger for the on-demand check
+    return (
+      <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
+        <button
+          onClick={onDeadLinksClick}
+          title="Click to check all saved links for 404s"
+          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+        >
+          <Link2 size={11} />
+          Check links
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
+      {unreadCount > 0 && (
+        <button
+          onClick={onUnreadClick}
+          title={`Bookmarks not opened in the last ${unreadThreshold} days`}
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            activeFilter === "unread"
+              ? "bg-primary/10 text-primary border-primary/30"
+              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+          )}
+        >
+          <Clock size={11} />
+          {unreadCount} unread
+        </button>
+      )}
+      <button
+        onClick={onDeadLinksClick}
+        title={deadCount > 0 ? "URLs that returned 404 or are no longer accessible" : "Click to check all saved links for 404s"}
+        className={cn(
+          "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+          deadCount > 0 && activeFilter === "deadlinks"
+            ? "bg-destructive/10 text-destructive border-destructive/30"
+            : deadCount > 0
+            ? "border-destructive/40 text-destructive hover:bg-destructive/10"
+            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+        )}
+      >
+        <Link2 size={11} />
+        {deadLinkChecking
+          ? `Checking… ${deadLinkProgress}/${deadLinkTotal}`
+          : deadCount > 0
+          ? `${deadCount} dead link${deadCount !== 1 ? "s" : ""}`
+          : "Check links"}
+      </button>
+      {emptyCount > 0 && (
+        <button
+          onClick={onEmptyFoldersClick}
+          title="Folders with no bookmarks — click to highlight them in the sidebar"
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            activeFilter === "emptyfolders"
+              ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
+              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+          )}
+        >
+          <FolderOpen size={11} />
+          {emptyCount} empty folder{emptyCount !== 1 ? "s" : ""}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ─── DroppableFolder ───────────────────────────────────────────── */
 
 function DroppableFolder({
@@ -86,6 +186,8 @@ function DroppableFolder({
   onRename,
   onDelete,
   onColorChange,
+  isEmptyHighlighted,
+  rootFolderCount,
 }: {
   folder: Folder;
   depth: number;
@@ -100,6 +202,8 @@ function DroppableFolder({
   onRename: () => void;
   onDelete: () => void;
   onColorChange: (color: string | undefined) => void;
+  isEmptyHighlighted?: boolean;
+  rootFolderCount?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
@@ -206,7 +310,14 @@ function DroppableFolder({
             className={cn("shrink-0", isActive ? "text-primary-foreground" : !colorHex ? "text-muted-foreground" : undefined)}
             style={!isActive && colorHex ? { color: colorHex } : undefined}
           />
-          {folder.name}
+          <span className={cn(isEmptyHighlighted && "text-amber-500 underline decoration-amber-500/60")}>
+            {folder.name}
+          </span>
+          {isRoot && rootFolderCount !== undefined && (
+            <span className={cn("ml-1 text-[10px]", isActive ? "text-primary-foreground/70" : "text-muted-foreground")}>
+              ({rootFolderCount})
+            </span>
+          )}
         </button>
         {!isRoot && (
           <div className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -274,9 +385,11 @@ type FolderTreeProps = {
   onDeleteFolder: (id: string) => void;
   onColorChange: (id: string, color: string | undefined) => void;
   onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
+  emptyFolderIds?: Set<string>;
+  rootFolderCount?: number;
 };
 
-function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename }: FolderTreeProps) {
+function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename, emptyFolderIds, rootFolderCount }: FolderTreeProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const toggleFolder = (folderId: string) => {
@@ -312,6 +425,8 @@ function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFol
         }}
         onDelete={() => onDeleteFolder(folderId)}
         onColorChange={(color) => onColorChange(folderId, color)}
+        isEmptyHighlighted={emptyFolderIds?.has(folderId)}
+        rootFolderCount={folderId === state.rootFolderId ? rootFolderCount : undefined}
       >
         {hasChildren && !isCollapsed && (
           <div>{childFolders.map((f) => renderFolder(f.id, depth + 1))}</div>
@@ -348,7 +463,7 @@ function SortableBookmarkItem({
   tagDefs,
   isDark,
   onToggleTags,
-  onSetReminder,
+  onSaveReminder,
 }: {
   bookmark: Bookmark;
   onOpen: () => void;
@@ -368,12 +483,15 @@ function SortableBookmarkItem({
   tagDefs?: Record<string, TagDef>;
   isDark?: boolean;
   onToggleTags?: () => void;
-  onSetReminder?: () => void;
+  onSaveReminder?: (reminderAt: number | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
+
   const [isDragging, setIsDragging] = useState(false);
   const [closestEdge, setClosestEdge] = useState<Edge | null>(null);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [reminderDateDraft, setReminderDateDraft] = useState("");
 
   useEffect(() => {
     const el = ref.current;
@@ -550,20 +668,75 @@ function SortableBookmarkItem({
           )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "h-7 w-7 shrink-0 transition-opacity",
-            bookmark.reminderAt
-              ? "text-amber-500"
-              : "opacity-0 group-hover/card:opacity-100 text-muted-foreground"
-          )}
-          onClick={onSetReminder}
-          title={bookmark.reminderAt ? "Edit reminder" : "Set reminder"}
-        >
-          <Bell size={14} />
-        </Button>
+        {onSaveReminder && (
+          <Popover open={reminderOpen} onOpenChange={(o) => { setReminderOpen(o); if (!o) setReminderDateDraft(""); }}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-7 w-7 shrink-0 transition-opacity",
+                  bookmark.reminderAt
+                    ? "text-amber-500"
+                    : "opacity-0 group-hover/card:opacity-100 text-muted-foreground"
+                )}
+                title={bookmark.reminderAt ? "Edit reminder" : "Set reminder"}
+              >
+                <Bell size={14} />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-3" align="end" side="bottom">
+              <p className="text-xs font-medium text-foreground mb-2">Set reminder</p>
+              {bookmark.reminderAt && (
+                <div className="flex items-center justify-between rounded bg-amber-500/10 border border-amber-500/20 px-2 py-1 mb-2">
+                  <span className="text-xs text-amber-700 dark:text-amber-400">
+                    Due {new Date(bookmark.reminderAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                  </span>
+                  <button
+                    onClick={() => { onSaveReminder(null); setReminderOpen(false); }}
+                    className="ml-1 p-0.5 rounded hover:text-destructive text-muted-foreground"
+                    title="Remove reminder"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+              <div className="space-y-1 mb-2">
+                {[{ label: "Tomorrow", days: 1 }, { label: "In 3 days", days: 3 }, { label: "In 1 week", days: 7 }].map(({ label, days }) => (
+                  <button
+                    key={days}
+                    onClick={() => {
+                      const ms = Date.now() + days * 86400000;
+                      onSaveReminder(ms);
+                      setReminderOpen(false);
+                    }}
+                    className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="date"
+                value={reminderDateDraft}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setReminderDateDraft(e.target.value)}
+                className="w-full border border-border rounded px-2 py-1 text-xs bg-background text-foreground mb-2"
+              />
+              <Button
+                size="sm"
+                className="w-full"
+                disabled={!reminderDateDraft}
+                onClick={() => {
+                  const ms = new Date(reminderDateDraft).getTime();
+                  if (!isNaN(ms)) { onSaveReminder(ms); setReminderOpen(false); setReminderDateDraft(""); }
+                }}
+              >
+                Set date
+              </Button>
+            </PopoverContent>
+          </Popover>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 group-hover/card:opacity-100 transition-opacity">
@@ -574,10 +747,7 @@ function SortableBookmarkItem({
             <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleNote}>Notes</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleTags}>Tags</DropdownMenuItem>
-            <DropdownMenuItem onClick={onSetReminder}>
-              <Bell size={12} className="mr-1.5" />
-              {bookmark.reminderAt ? "Edit reminder" : "Set reminder"}
-            </DropdownMenuItem>
+
             <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -1051,11 +1221,11 @@ type BookmarkListProps = {
   tagDefs: Record<string, TagDef>;
   onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
   isDark?: boolean;
-  onSetReminder?: (bookmarkId: string, bookmarkName: string, currentReminderAt?: number) => void;
+  onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
   searchScopedToFolder?: boolean;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSetReminder, searchScopedToFolder }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, searchScopedToFolder }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
@@ -1160,7 +1330,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
         tagDefs={tagDefs}
         isDark={isDark}
         onToggleTags={() => setExpandedTags((prev) => ({ ...prev, [b.id]: !prev[b.id] }))}
-        onSetReminder={onSetReminder ? () => onSetReminder(b.id, b.name, b.reminderAt) : undefined}
+        onSaveReminder={onSaveReminder ? (reminderAt) => onSaveReminder(b.id, reminderAt) : undefined}
       />
       {expandedTags[b.id] && (
         <TagEditor
@@ -1487,7 +1657,7 @@ export default function Library() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [tagsExpanded, setTagsExpanded] = useState(true);
-  const defaultPrefs: Prefs = { highlightDurationMs: 3000, snippetDismissMs: 12000, reminderNotificationEnabled: false, reminderNotificationHour: 9 };
+  const defaultPrefs: Prefs = { highlightDurationMs: 3000, snippetDismissMs: 12000, reminderNotificationEnabled: false, reminderNotificationHour: 9, unreadTrackingEnabled: false, unreadThresholdDays: 60 };
   const [prefs, setPrefsState] = useState<Prefs>(defaultPrefs);
   const [prefsDraft, setPrefsDraft] = useState<Prefs>(defaultPrefs);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1498,12 +1668,12 @@ export default function Library() {
   const [pickerSuggestedIds, setPickerSuggestedIds] = useState<string[]>([]);
   const [pickerTagIds, setPickerTagIds] = useState<string[]>([]);
   const [remindersCollapsed, setRemindersCollapsed] = useState(false);
-  const [reminderDialog, setReminderDialog] = useState<{
-    bookmarkId: string;
-    bookmarkName: string;
-    currentReminderAt?: number;
-  } | null>(null);
-  const [reminderDateDraft, setReminderDateDraft] = useState("");
+  const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter | null>(null);
+  const [deadLinkChecking, setDeadLinkChecking] = useState(false);
+  const [deadLinkProgress, setDeadLinkProgress] = useState(0);
+  const [deadLinkTotal, setDeadLinkTotal] = useState(0);
+  const [showDeadLinkModal, setShowDeadLinkModal] = useState(false);
+  const [deadLinkModalResult, setDeadLinkModalResult] = useState<{ dead: number; total: number } | null>(null);
 
   useEffect(() => {
     getPrefs().then((p) => { setPrefsState(p); setPrefsDraft(p); });
@@ -1655,6 +1825,20 @@ export default function Library() {
   const allBookmarks = Object.values(state.bookmarks);
   const dueBookmarks = allBookmarks.filter(isDue);
 
+  // ─── Health dashboard computed values ───────────────────────────
+  const unreadThresholdMs = (prefs.unreadThresholdDays ?? 60) * 86_400_000;
+  const unreadBookmarks = (prefs.unreadTrackingEnabled ?? false)
+    ? allBookmarks.filter((b) => (b.lastOpenedAt ?? 0) === 0 || Date.now() - (b.lastOpenedAt ?? 0) > unreadThresholdMs)
+    : [];
+  const deadLinkBookmarks = allBookmarks.filter((b) => b.isDeadLink === true);
+  const emptyFolderList = Object.values(state.folders).filter(
+    (f) => f.id !== state.rootFolderId && !allBookmarks.some((b) => b.folderId === f.id)
+  );
+  const emptyFolderIds = dashboardFilter === "emptyfolders"
+    ? new Set(emptyFolderList.map((f) => f.id))
+    : new Set<string>();
+  const rootFolderCount = Object.keys(state.folders).length - 1;
+
   const sortedTagDefs = Object.values(state.tagDefs ?? {}).sort((a, b) => a.name.localeCompare(b.name));
 
   const sourceFiltered = sourceFilter === "all"
@@ -1688,7 +1872,7 @@ export default function Library() {
     : dateFiltered;
 
   const isSearching = searchQuery.trim().length > 0;
-  const filtered = isSearching
+  const searchFiltered = isSearching
     ? tagFiltered.filter((b) => {
         const q = searchQuery.toLowerCase();
         return (
@@ -1700,6 +1884,26 @@ export default function Library() {
         );
       })
     : tagFiltered;
+
+  // Dashboard filter overrides folder/tag/source filters but respects search on top
+  const dashboardBase =
+    dashboardFilter === "unread"    ? unreadBookmarks :
+    dashboardFilter === "deadlinks" ? deadLinkBookmarks :
+    null; // "emptyfolders" shows in sidebar, not bookmark list
+  const filtered = dashboardBase !== null
+    ? (isSearching
+        ? dashboardBase.filter((b) => {
+            const q = searchQuery.toLowerCase();
+            return (
+              b.name.toLowerCase().includes(q) ||
+              b.url.toLowerCase().includes(q) ||
+              b.domain.toLowerCase().includes(q) ||
+              (b.snippet?.text ?? "").toLowerCase().includes(q) ||
+              (b.notes ?? "").toLowerCase().includes(q)
+            );
+          })
+        : dashboardBase)
+    : searchFiltered;
 
   const refreshState = async () => {
     const s = await getState();
@@ -1741,11 +1945,42 @@ export default function Library() {
 
   const handleSelectFolder = async (id: string) => {
     setActiveFolderId(id);
+    setDashboardFilter(null);
     if (isPickerMode && pendingSave) {
       await handlePickerSave(id);
     } else {
       try { await setLastUsedFolder(id); } catch { /* no-op */ }
     }
+  };
+
+  const handleCheckDeadLinks = async () => {
+    if (deadLinkChecking) return;
+    const bookmarkList = Object.values(state.bookmarks);
+    if (bookmarkList.length === 0) return;
+    setDeadLinkChecking(true);
+    setDeadLinkProgress(0);
+    setDeadLinkTotal(bookmarkList.length);
+    showToast("Checking your links in the background — keep using ZeroPin as normal. We'll let you know when it's done.", "info");
+    const BATCH = 10;
+    const deadIds: string[] = [];
+    for (let i = 0; i < bookmarkList.length; i += BATCH) {
+      const batch = bookmarkList.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (b) => {
+        try {
+          const res = await fetch(b.url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+          if (res.status === 404 || res.status === 410) deadIds.push(b.id);
+        } catch { /* timeout / CORS / network error = treat as working */ }
+      }));
+      setDeadLinkProgress(Math.min(i + BATCH, bookmarkList.length));
+      if (i + BATCH < bookmarkList.length) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    await updateDeadLinkResults(bookmarkList.map((b) => ({ id: b.id, isDeadLink: deadIds.includes(b.id) })));
+    setDeadLinkChecking(false);
+    setDeadLinkModalResult({ dead: deadIds.length, total: bookmarkList.length });
+    setShowDeadLinkModal(true);
+    await refreshState();
   };
 
   const handlePickerSave = async (folderId: string) => {
@@ -1906,18 +2141,11 @@ export default function Library() {
     }
   };
 
-  const handleSaveReminder = async (bookmarkId: string, dateStr: string) => {
+  const handleSaveReminderDirect = async (bookmarkId: string, reminderAt: number | null) => {
     try {
-      const ms = dateStr ? new Date(dateStr).getTime() : null;
-      if (ms && !isNaN(ms)) {
-        await setBookmarkReminder(bookmarkId, ms);
-      } else {
-        await setBookmarkReminder(bookmarkId, null);
-      }
+      await setBookmarkReminder(bookmarkId, reminderAt);
       chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
       await refreshState();
-      setReminderDialog(null);
-      setReminderDateDraft("");
     } catch (err) {
       console.error("Failed to save reminder", err);
     }
@@ -2045,7 +2273,7 @@ export default function Library() {
 
   return (
     <>
-      <div className="h-screen w-screen bg-background">
+      <div className="h-screen w-screen bg-background overflow-hidden">
         <div className="w-full h-screen overflow-hidden bg-card flex flex-col">
           {/* Header */}
           <div className="sticky top-0 z-10 bg-card border-b border-border p-3">
@@ -2075,9 +2303,22 @@ export default function Library() {
               </div>
             </div>
             <div className="mt-2.5 flex flex-col gap-2">
+                <HealthDashboard
+                  unreadCount={unreadBookmarks.length}
+                  deadCount={deadLinkBookmarks.length}
+                  emptyCount={emptyFolderList.length}
+                  deadLinkChecking={deadLinkChecking}
+                  deadLinkProgress={deadLinkProgress}
+                  deadLinkTotal={deadLinkTotal}
+                  activeFilter={dashboardFilter}
+                  unreadThreshold={prefs.unreadThresholdDays ?? 60}
+                  onUnreadClick={() => setDashboardFilter((f) => f === "unread" ? null : "unread")}
+                  onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
+                  onEmptyFoldersClick={() => setDashboardFilter((f) => f === "emptyfolders" ? null : "emptyfolders")}
+                />
                 <TopBar
                   searchQuery={searchQuery}
-                  onSearchChange={setSearchQuery}
+                  onSearchChange={(q) => { setSearchQuery(q); if (q.trim()) setDashboardFilter(null); }}
                   onCreateFolder={handleCreateFolder}
                   onExport={handleExport}
                   onImport={handleImport}
@@ -2242,6 +2483,8 @@ export default function Library() {
                 onRequestRename={(title, currentName, onCommit) =>
                   setRenameDialog({ title, currentName, onConfirm: onCommit })
                 }
+                emptyFolderIds={emptyFolderIds}
+                rootFolderCount={rootFolderCount}
               />
               {/* Tags section */}
               <div className="mt-4 pt-4 border-t border-border px-2">
@@ -2311,6 +2554,17 @@ export default function Library() {
                 />
               )}
               {!isSearching && <RecentPins bookmarks={allBookmarks} onOpen={handleOpenBookmark} />}
+              {dashboardFilter && (
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <span className="text-xs text-muted-foreground">Showing:</span>
+                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
+                    {dashboardFilter === "unread" && "Unread bookmarks"}
+                    {dashboardFilter === "deadlinks" && "Dead links"}
+                    {dashboardFilter === "emptyfolders" && "Empty folders (highlighted in sidebar)"}
+                    <button onClick={() => setDashboardFilter(null)} className="ml-0.5 hover:text-primary/70">&times;</button>
+                  </span>
+                </div>
+              )}
               {activeTagFilter && state.tagDefs?.[activeTagFilter] && (
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <span className="text-xs text-muted-foreground">Filtered by tag:</span>
@@ -2347,7 +2601,7 @@ export default function Library() {
                 tagDefs={state.tagDefs ?? {}}
                 onSetBookmarkTags={handleSetBookmarkTags}
                 isDark={isDark}
-                onSetReminder={(id, name, curr) => setReminderDialog({ bookmarkId: id, bookmarkName: name, currentReminderAt: curr })}
+                onSaveReminder={handleSaveReminderDirect}
                 searchScopedToFolder={searchWithinFolder}
               />
             </div>
@@ -2393,6 +2647,32 @@ export default function Library() {
             onBulkReminder={handleBulkSetReminder}
           />
         )}
+
+        {/* Dead link check completion modal */}
+        <Dialog open={showDeadLinkModal} onOpenChange={setShowDeadLinkModal}>
+          <DialogContent className="sm:max-w-sm overflow-y-auto max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>Link check complete</DialogTitle>
+              <DialogDescription className="sr-only">Results of the dead link check</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-2">
+              <p className="text-sm text-muted-foreground">
+                ✓ {((deadLinkModalResult?.total ?? 0) - (deadLinkModalResult?.dead ?? 0))} links working
+              </p>
+              <p className="text-sm font-medium">
+                💀 {deadLinkModalResult?.dead ?? 0} dead link{(deadLinkModalResult?.dead ?? 0) !== 1 ? "s" : ""} found
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end mt-2">
+              <Button variant="outline" onClick={() => setShowDeadLinkModal(false)}>Dismiss</Button>
+              {(deadLinkModalResult?.dead ?? 0) > 0 && (
+                <Button onClick={() => { setShowDeadLinkModal(false); setDashboardFilter("deadlinks"); }}>
+                  View dead links
+                </Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Rename dialog — replaces window.prompt() */}
         {renameDialog && (
@@ -2514,6 +2794,33 @@ export default function Library() {
                 )}
                 <p className="text-xs text-muted-foreground">When enabled, ZeroPin sends one daily OS notification if you have due reminders. The Reminders section in the library is always available regardless of this setting.</p>
               </div>
+              <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-sm font-medium">Library Health</p>
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={prefsDraft.unreadTrackingEnabled ?? false}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, unreadTrackingEnabled: e.target.checked }))}
+                    className="cursor-pointer"
+                  />
+                  Track unread bookmarks
+                </label>
+                <p className="text-xs text-muted-foreground">Shows bookmarks not opened via ZeroPin in the health dashboard. Starts tracking from today — bookmarks saved before enabling this will initially appear as unread.</p>
+                {(prefsDraft.unreadTrackingEnabled ?? false) && (
+                  <div className="flex items-center gap-2 text-sm pl-5">
+                    <span className="text-muted-foreground">Mark unread after</span>
+                    <input
+                      type="number"
+                      min={7}
+                      max={365}
+                      value={prefsDraft.unreadThresholdDays ?? 60}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, unreadThresholdDays: Math.max(7, Math.min(365, Number(e.target.value))) }))}
+                      className="w-16 border border-border rounded px-1.5 py-0.5 bg-background text-foreground text-center"
+                    />
+                    <span className="text-muted-foreground">days</span>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <Button variant="outline" onClick={() => setSettingsOpen(false)}>Cancel</Button>
@@ -2547,66 +2854,6 @@ export default function Library() {
                   <span className="text-muted-foreground">{desc}</span>
                 </div>
               ))}
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Reminder dialog */}
-        <Dialog open={!!reminderDialog} onOpenChange={(open) => { if (!open) { setReminderDialog(null); setReminderDateDraft(""); } }}>
-          <DialogContent className="sm:max-w-sm overflow-y-auto max-h-[90vh]">
-            <DialogHeader>
-              <DialogTitle>Set reminder</DialogTitle>
-              <DialogDescription className="truncate">{reminderDialog?.bookmarkName}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 py-1">
-              <div className="flex flex-wrap gap-2">
-                {[
-                  { label: "Tomorrow", days: 1 },
-                  { label: "In 3 days", days: 3 },
-                  { label: "In 1 week", days: 7 },
-                ].map(({ label, days }) => (
-                  <Button
-                    key={days}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const d = new Date(Date.now() + days * 86400000);
-                      setReminderDateDraft(d.toISOString().slice(0, 10));
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </div>
-              <input
-                type="date"
-                value={reminderDateDraft}
-                min={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setReminderDateDraft(e.target.value)}
-                className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
-              />
-            </div>
-            <div className="flex justify-between mt-2">
-              {reminderDialog?.currentReminderAt && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => reminderDialog && handleSaveReminder(reminderDialog.bookmarkId, "")}
-                >
-                  Remove reminder
-                </Button>
-              )}
-              <div className="flex gap-2 ml-auto">
-                <Button variant="outline" size="sm" onClick={() => { setReminderDialog(null); setReminderDateDraft(""); }}>Cancel</Button>
-                <Button
-                  size="sm"
-                  disabled={!reminderDateDraft}
-                  onClick={() => reminderDialog && handleSaveReminder(reminderDialog.bookmarkId, reminderDateDraft)}
-                >
-                  Save
-                </Button>
-              </div>
             </div>
           </DialogContent>
         </Dialog>

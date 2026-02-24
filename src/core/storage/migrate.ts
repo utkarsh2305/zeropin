@@ -97,6 +97,11 @@ const migrations: Record<number, Migration> = {
     state.schemaVersion = 9;
     return state;
   },
+  // v9 → v10: add isDeadLink and deadLinkCheckedAt fields (optional — no initialization needed)
+  9: (state) => {
+    state.schemaVersion = 10;
+    return state;
+  },
 };
 
 /**

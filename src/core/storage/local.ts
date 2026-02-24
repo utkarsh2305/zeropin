@@ -501,6 +501,22 @@ export async function recordBookmarkOpen(id: string): Promise<void> {
   await setState(state);
 }
 
+/** Bulk-writes dead-link check results after an on-demand link check completes. */
+export async function updateDeadLinkResults(
+  results: Array<{ id: string; isDeadLink: boolean }>
+): Promise<void> {
+  const state = await getState();
+  const checkedAt = Date.now();
+  for (const { id, isDeadLink } of results) {
+    const b = state.bookmarks[id];
+    if (!b) continue;
+    b.isDeadLink = isDeadLink;
+    b.deadLinkCheckedAt = checkedAt;
+    b.updatedAt = checkedAt;
+  }
+  await setState(state);
+}
+
 export async function recordAnchorResolution(
   id: string,
   confidence: number,

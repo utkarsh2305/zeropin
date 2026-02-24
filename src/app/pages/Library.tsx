@@ -26,7 +26,8 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
-import { AI_CHAT_DOMAINS } from "../../core/constants";
+import { useFilterPipeline } from "../hooks/useFilterPipeline";
+import type { DashboardFilter } from "../hooks/useFilterPipeline";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
 
@@ -72,8 +73,6 @@ const FOLDER_COLORS: Record<string, { light: string; dark: string } | null> = {
 };
 
 /* ─── HealthDashboard ───────────────────────────────────────────── */
-
-type DashboardFilter = "unread" | "deadlinks" | "emptyfolders";
 
 function HealthDashboard({
   unreadCount,
@@ -919,13 +918,6 @@ function getDescendantFolderIds(
 
 /* ─── Reminder helpers ──────────────────────────────────────────── */
 
-function isDue(b: Bookmark): boolean {
-  if (!b.reminderAt) return false;
-  if (b.reminderAt > Date.now()) return false;
-  if (b.reminderSnoozedUntil && b.reminderSnoozedUntil > Date.now()) return false;
-  return true;
-}
-
 function reminderLabel(reminderAt: number): string {
   const diff = reminderAt - Date.now();
   if (diff <= 0) return "Due now";
@@ -1558,10 +1550,6 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 
 /* ─── AI domain detection ──────────────────────────────────────── */
 
-function isAiDomain(domain: string): boolean {
-  return AI_CHAT_DOMAINS.has(domain);
-}
-
 /* ─── Library (main component) ──────────────────────────────────── */
 
 function countFolderContents(
@@ -1813,88 +1801,26 @@ export default function Library() {
   if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
 
   const currentFolderId = activeFolderId ?? state.rootFolderId;
-  const allBookmarks = Object.values(state.bookmarks);
-  const dueBookmarks = allBookmarks.filter(isDue);
 
-  // ─── Health dashboard computed values ───────────────────────────
-  const unreadThresholdMs = (prefs.unreadThresholdDays ?? 60) * 86_400_000;
-  const unreadBookmarks = (prefs.unreadTrackingEnabled ?? false)
-    ? allBookmarks.filter((b) => (b.lastOpenedAt ?? 0) === 0 || Date.now() - (b.lastOpenedAt ?? 0) > unreadThresholdMs)
-    : [];
-  const deadLinkBookmarks = allBookmarks.filter((b) => b.isDeadLink === true);
-  const emptyFolderList = Object.values(state.folders).filter(
-    (f) => f.id !== state.rootFolderId && !allBookmarks.some((b) => b.folderId === f.id)
-  );
-  const emptyFolderIds = dashboardFilter === "emptyfolders"
-    ? new Set(emptyFolderList.map((f) => f.id))
-    : new Set<string>();
-  const rootFolderCount = Object.keys(state.folders).length - 1;
-
-  const sortedTagDefs = Object.values(state.tagDefs ?? {}).sort((a, b) => a.name.localeCompare(b.name));
-
-  const sourceFiltered = sourceFilter === "all"
-    ? allBookmarks
-    : allBookmarks.filter((b) => {
-        const cc = b.snippet?.chatContext;
-        const hasAiMeta = cc?.platform && cc.platform !== "unknown";
-        const domainIsAi = isAiDomain(b.domain);
-        if (sourceFilter === "web") return !hasAiMeta && !domainIsAi;
-        if (sourceFilter === "ai_answer") return cc?.role === "assistant" || (domainIsAi && cc?.role !== "user");
-        if (sourceFilter === "ai_prompt") return cc?.role === "user";
-        return true;
-      });
-
-  const dateFiltered = (dateFrom || dateTo)
-    ? sourceFiltered.filter((b) => {
-        if (dateFrom) {
-          const fromMs = new Date(dateFrom).setHours(0, 0, 0, 0);
-          if (b.createdAt < fromMs) return false;
-        }
-        if (dateTo) {
-          const toMs = new Date(dateTo).setHours(23, 59, 59, 999);
-          if (b.createdAt > toMs) return false;
-        }
-        return true;
-      })
-    : sourceFiltered;
-
-  const tagFiltered = activeTagFilter
-    ? dateFiltered.filter((b) => (b.tags ?? []).includes(activeTagFilter))
-    : dateFiltered;
-
-  const isSearching = searchQuery.trim().length > 0;
-  const searchFiltered = isSearching
-    ? tagFiltered.filter((b) => {
-        const q = searchQuery.toLowerCase();
-        return (
-          b.name.toLowerCase().includes(q) ||
-          b.url.toLowerCase().includes(q) ||
-          b.domain.toLowerCase().includes(q) ||
-          (b.snippet?.text ?? "").toLowerCase().includes(q) ||
-          (b.notes ?? "").toLowerCase().includes(q)
-        );
-      })
-    : tagFiltered;
-
-  // Dashboard filter overrides folder/tag/source filters but respects search on top
-  const dashboardBase =
-    dashboardFilter === "unread"    ? unreadBookmarks :
-    dashboardFilter === "deadlinks" ? deadLinkBookmarks :
-    null; // "emptyfolders" shows in sidebar, not bookmark list
-  const filtered = dashboardBase !== null
-    ? (isSearching
-        ? dashboardBase.filter((b) => {
-            const q = searchQuery.toLowerCase();
-            return (
-              b.name.toLowerCase().includes(q) ||
-              b.url.toLowerCase().includes(q) ||
-              b.domain.toLowerCase().includes(q) ||
-              (b.snippet?.text ?? "").toLowerCase().includes(q) ||
-              (b.notes ?? "").toLowerCase().includes(q)
-            );
-          })
-        : dashboardBase)
-    : searchFiltered;
+  const {
+    allBookmarks,
+    dueBookmarks,
+    filtered,
+    unreadBookmarks,
+    deadLinkBookmarks,
+    emptyFolderList,
+    emptyFolderIds,
+    sortedTagDefs,
+    rootFolderCount,
+    isSearching,
+  } = useFilterPipeline(state, prefs, {
+    searchQuery,
+    sourceFilter,
+    dateFrom,
+    dateTo,
+    activeTagFilter,
+    dashboardFilter,
+  });
 
   const refreshState = async () => {
     const s = await getState();

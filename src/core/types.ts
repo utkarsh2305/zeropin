@@ -95,6 +95,7 @@ export interface Bookmark {
       xpath?: string;
       containerTextSample?: string;
       githubLineNumber?: number;
+      isCodeViewer?: boolean;
     };
     repairedAt?: number;
   };

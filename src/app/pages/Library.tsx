@@ -23,7 +23,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -1238,11 +1239,9 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ searchQuery, onSearchChange, searchWithinFolder, onToggleSearchWithinFolder, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
+function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
   searchQuery: string;
   onSearchChange: (q: string) => void;
-  searchWithinFolder: boolean;
-  onToggleSearchWithinFolder: () => void;
   onCreateFolder: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -1261,23 +1260,6 @@ function TopBar({ searchQuery, onSearchChange, searchWithinFolder, onToggleSearc
         onChange={(e) => onSearchChange(e.target.value)}
         className="flex-1 min-w-50 h-9"
       />
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onToggleSearchWithinFolder}
-        className={cn(
-          "h-9 shrink-0 gap-1.5",
-          searchWithinFolder
-            ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
-            : "w-9 px-0 text-muted-foreground hover:text-foreground"
-        )}
-        title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
-      >
-        <FolderSearch size={16} />
-        {searchWithinFolder && (
-          <span className="text-xs font-medium">Current folder</span>
-        )}
-      </Button>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -1483,6 +1465,8 @@ export default function Library() {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<"all" | "web" | "ai_answer" | "ai_prompt">("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [browserImportPreview, setBrowserImportPreview] = useState<BrowserImportPreview | null>(null);
   const [includeDups, setIncludeDups] = useState(false);
@@ -1683,9 +1667,23 @@ export default function Library() {
         return true;
       });
 
-  const tagFiltered = activeTagFilter
-    ? sourceFiltered.filter((b) => (b.tags ?? []).includes(activeTagFilter))
+  const dateFiltered = (dateFrom || dateTo)
+    ? sourceFiltered.filter((b) => {
+        if (dateFrom) {
+          const fromMs = new Date(dateFrom).setHours(0, 0, 0, 0);
+          if (b.createdAt < fromMs) return false;
+        }
+        if (dateTo) {
+          const toMs = new Date(dateTo).setHours(23, 59, 59, 999);
+          if (b.createdAt > toMs) return false;
+        }
+        return true;
+      })
     : sourceFiltered;
+
+  const tagFiltered = activeTagFilter
+    ? dateFiltered.filter((b) => (b.tags ?? []).includes(activeTagFilter))
+    : dateFiltered;
 
   const isSearching = searchQuery.trim().length > 0;
   const filtered = isSearching
@@ -2073,13 +2071,10 @@ export default function Library() {
                 </div>
               </div>
             </div>
-            <div className="mt-2.5 flex gap-2 items-start">
-              <div className="flex-1">
+            <div className="mt-2.5 flex flex-col gap-2">
                 <TopBar
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
-                  searchWithinFolder={searchWithinFolder}
-                  onToggleSearchWithinFolder={() => setSearchWithinFolder((v) => !v)}
                   onCreateFolder={handleCreateFolder}
                   onExport={handleExport}
                   onImport={handleImport}
@@ -2093,7 +2088,24 @@ export default function Library() {
                     setSettingsOpen(true);
                   }}
                 />
-              </div>
+              <div className="flex gap-2 items-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSearchWithinFolder((v) => !v)}
+                className={cn(
+                  "h-9 shrink-0 gap-1.5",
+                  searchWithinFolder
+                    ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
+                    : "w-9 px-0 text-muted-foreground hover:text-foreground"
+                )}
+                title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
+              >
+                <FolderSearch size={16} />
+                {searchWithinFolder && (
+                  <span className="text-xs font-medium">Current folder</span>
+                )}
+              </Button>
               <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as typeof sourceFilter)}>
                 <SelectTrigger className="w-auto h-9 text-xs shrink-0">
                   <SelectValue />
@@ -2105,6 +2117,59 @@ export default function Library() {
                   <SelectItem value="ai_prompt">AI Prompts</SelectItem>
                 </SelectContent>
               </Select>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "h-9 shrink-0 gap-1.5 px-2",
+                      (dateFrom || dateTo)
+                        ? "text-primary bg-primary/10 hover:bg-primary/20"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Filter by date added"
+                  >
+                    <CalendarDays size={15} />
+                    {(dateFrom || dateTo) && (
+                      <span className="text-xs font-medium">
+                        {dateFrom || "…"} → {dateTo || "…"}
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-3 space-y-3" align="start">
+                  <p className="text-xs font-medium text-foreground">Date added</p>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground block">From</label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      max={dateTo || undefined}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground block">To</label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                    />
+                  </div>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                      onClick={() => { setDateFrom(""); setDateTo(""); }}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </PopoverContent>
+              </Popover>
               <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
                 <SelectTrigger className="w-auto h-9 text-xs shrink-0">
                   <SelectValue />
@@ -2118,6 +2183,7 @@ export default function Library() {
                   <SelectItem value="most_opened">Most Opened</SelectItem>
                 </SelectContent>
               </Select>
+              </div>
             </div>
           </div>
 

@@ -62,6 +62,7 @@ interface SnippetAnchor {
     xpath?: string;
     containerTextSample?: string;
     githubLineNumber?: number;
+    isCodeViewer?: boolean;
   };
   repairedAt?: number;
 }
@@ -263,10 +264,34 @@ function captureContainerHint(range: Range): SnippetAnchor["containerHint"] | nu
     }
   }
 
+  // Detect code viewer pages at save time so navigate-time can skip DOM matching.
+  // URL patterns cover known sites; DOM signatures catch self-hosted editors
+  // (Gitea, Codeberg, self-hosted GitLab) using Monaco or CodeMirror.
+  let isCodeViewer = false;
+  try {
+    const { hostname, pathname } = window.location;
+    const host = hostname.replace(/^www\./, "");
+    if ((host === "github.com" || host === "gitlab.com") && pathname.includes("/blob/")) {
+      isCodeViewer = true;
+    } else if (host === "github.dev" || host === "vscode.dev") {
+      isCodeViewer = true;
+    } else if (
+      (document.querySelector(".view-lines") ||
+        document.querySelector(".cm-editor") ||
+        document.querySelector(".CodeMirror")) &&
+      (document.querySelector("[id^='L']") ||
+        document.querySelector(".blob-num") ||
+        document.querySelector(".diff-line-num"))
+    ) {
+      isCodeViewer = true;
+    }
+  } catch { /* ignore */ }
+
   return {
     cssPath: cssPath || undefined,
     containerTextSample,
     ...(githubLineNumber !== undefined ? { githubLineNumber } : {}),
+    ...(isCodeViewer ? { isCodeViewer: true } : {}),
   };
 }
 
@@ -1264,6 +1289,20 @@ function isAiChatDomain(): boolean {
   }
 }
 
+/** URL-based fallback for pins saved before the isCodeViewer flag existed.
+ *  Catches known code file viewer pages where hash-nav triggers SPA re-renders. */
+function isCodeViewerPage(): boolean {
+  try {
+    const { hostname, pathname } = window.location;
+    const host = hostname.replace(/^www\./, "");
+    if ((host === "github.com" || host === "gitlab.com") && pathname.includes("/blob/")) return true;
+    if (host === "github.dev" || host === "vscode.dev") return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // ── Chat page detection for stabilization ──
 
 function isChatPage(anchor: SnippetAnchor): boolean {
@@ -1330,6 +1369,16 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
     return;
   }
 
+  // Code viewer pages (GitHub/GitLab blob, github.dev, vscode.dev, and any
+  // Monaco/CodeMirror site detected at save time): syntax highlighting fragments
+  // text across spans and hash-nav triggers expensive SPA re-renders.
+  // Show snippet card (same pattern as AI chat) — user uses Ctrl+F + Ctrl+V.
+  if (anchor.containerHint?.isCodeViewer || isCodeViewerPage()) {
+    showSnippetCard(anchor);
+    chrome.storage.local.remove("ZP_HIGHLIGHT_REQUEST");
+    return;
+  }
+
   const doHighlight = () => {
     const result = highlightSnippet(anchor);
     if (result.found) {
@@ -1342,18 +1391,6 @@ function processHighlightRequest(anchor: SnippetAnchor, bookmarkId?: string): vo
     // Text not in DOM yet (dynamic pages). Retry via debounced MutationObserver.
     startMutationRetry(anchor, bookmarkId);
   };
-
-  // GitHub blob: navigate to the stored line so GitHub's virtual renderer
-  // renders those lines into the DOM. The MutationObserver in startMutationRetry
-  // will then find the text when it appears.
-  const ghLine = anchor.containerHint?.githubLineNumber;
-  if (
-    ghLine !== undefined &&
-    window.location.hostname === "github.com" &&
-    window.location.pathname.includes("/blob/")
-  ) {
-    window.location.hash = "#L" + ghLine;
-  }
 
   // Use DOM stabilization gate for chat pages, simple delay for others
   if (isChatPage(anchor)) {

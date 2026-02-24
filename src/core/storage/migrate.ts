@@ -104,6 +104,15 @@ const migrations: Record<number, Migration> = {
   },
 };
 
+function assertMigratedState(state: any): void {
+  if (!state.rootFolderId)
+    throw new Error("Migration corrupted: missing rootFolderId");
+  if (typeof state.folders !== "object")
+    throw new Error("Migration corrupted: folders is not an object");
+  if (typeof state.bookmarks !== "object")
+    throw new Error("Migration corrupted: bookmarks is not an object");
+}
+
 /**
  * Migrates a raw storage object to the current schema version.
  * - Missing schemaVersion → treated as v0
@@ -123,5 +132,6 @@ export function migrateState(raw: any): LibraryState {
     raw = fn(raw);
   }
 
+  assertMigratedState(raw);
   return raw as LibraryState;
 }

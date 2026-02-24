@@ -319,13 +319,8 @@ function captureAnchor(): SnippetAnchor | null {
     const fingerprint = buildFingerprint(text);
     const chatContext = detectChatContext(range) ?? undefined;
 
-    if (chatContext) {
-    }
-
     // Container hint: find a stable ancestor container
     const containerHint = captureContainerHint(range) ?? undefined;
-    if (containerHint) {
-    }
 
     return {
       text,

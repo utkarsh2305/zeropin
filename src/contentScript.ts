@@ -32,6 +32,7 @@ import {
 } from "./core/youtube";
 import type { YouTubeCaptureResult } from "./core/youtube";
 import { getPrefs, type Prefs } from "./core/storage/prefs";
+import { AI_CHAT_DOMAINS } from "./core/constants";
 
 interface SnippetAnchor {
   text: string;
@@ -1252,23 +1253,6 @@ function waitForDomStable(
 }
 
 // ── AI chat domain detection ──
-
-const AI_CHAT_DOMAINS = new Set([
-  "chatgpt.com",
-  "chat.openai.com",
-  "claude.ai",
-  "gemini.google.com",
-  "bard.google.com",
-  "copilot.microsoft.com",
-  "poe.com",
-  "perplexity.ai",
-  "grok.com",
-  "x.com",
-  "deepseek.com",
-  "chat.deepseek.com",
-  "huggingface.co",
-  "chat.mistral.ai",
-]);
 
 function isAiChatDomain(): boolean {
   try {

@@ -1,0 +1,16 @@
+export const AI_CHAT_DOMAINS = new Set([
+  "chatgpt.com",
+  "chat.openai.com",
+  "claude.ai",
+  "gemini.google.com",
+  "bard.google.com",
+  "copilot.microsoft.com",
+  "poe.com",
+  "perplexity.ai",
+  "grok.com",
+  "x.com",
+  "deepseek.com",
+  "chat.deepseek.com",
+  "huggingface.co",
+  "chat.mistral.ai",
+]);

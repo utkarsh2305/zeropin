@@ -26,6 +26,7 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
+import { AI_CHAT_DOMAINS } from "../../core/constants";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
 
@@ -1555,17 +1556,6 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 }
 
 /* ─── AI domain detection ──────────────────────────────────────── */
-
-const AI_CHAT_DOMAINS = new Set([
-  "chatgpt.com",
-  "chat.openai.com",
-  "claude.ai",
-  "gemini.google.com",
-  "bard.google.com",
-  "copilot.microsoft.com",
-  "poe.com",
-  "perplexity.ai",
-]);
 
 function isAiDomain(domain: string): boolean {
   return AI_CHAT_DOMAINS.has(domain);

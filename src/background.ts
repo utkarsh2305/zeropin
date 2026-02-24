@@ -7,6 +7,16 @@ import { getRecentFolderIds, updateRecents, setPendingSave, RECENTS_KEY, compute
 import type { PendingSave } from "./core/storage/recents";
 import { getPrefs } from "./core/storage/prefs";
 
+const MSG = {
+  CAPTURE_ANCHOR:        "ZP_CAPTURE_ANCHOR",
+  CAPTURE_YT_MOMENT:     "ZP_CAPTURE_YT_MOMENT",
+  SHOW_SAVE_CONFIRM:     "ZP_SHOW_SAVE_CONFIRM",
+  GET_SELECTION_PAYLOAD: "ZP_GET_SELECTION_PAYLOAD",
+  ANCHOR_RESOLVED:       "ZP_ANCHOR_RESOLVED",
+  FOLDERS_CHANGED:       "ZP_FOLDERS_CHANGED",
+  REMINDERS_CHANGED:     "ZP_REMINDERS_CHANGED",
+} as const;
+
 function tabsGet(tabId: number): Promise<chrome.tabs.Tab> {
   return new Promise((resolve, reject) => {
     chrome.tabs.get(tabId, (t) => {
@@ -39,35 +49,45 @@ function sendMessage<T>(
 async function rebuildContextMenus(): Promise<void> {
   await new Promise<void>((r) => chrome.contextMenus.removeAll(r));
 
-  chrome.contextMenus.create({
-    id: "zp_save_root",
-    title: "Save to ZeroPin",
-    contexts: ["page", "selection"],
-  });
-
-  const [rawRecents, state] = await Promise.all([getRecentFolderIds(), getState()]);
-
-  // Filter out deleted folders and persist cleaned list
-  const validRecents = rawRecents.filter((id) => !!state.folders[id]);
-  if (validRecents.length !== rawRecents.length) {
-    await chrome.storage.local.set({ [RECENTS_KEY]: validRecents });
-  }
-
-  for (const folderId of validRecents) {
+  try {
     chrome.contextMenus.create({
-      id: `zp_save_recent_${folderId}`,
+      id: "zp_save_root",
+      title: "Save to ZeroPin",
+      contexts: ["page", "selection"],
+    });
+
+    const [rawRecents, state] = await Promise.all([getRecentFolderIds(), getState()]);
+
+    // Filter out deleted folders and persist cleaned list
+    const validRecents = rawRecents.filter((id) => !!state.folders[id]);
+    if (validRecents.length !== rawRecents.length) {
+      await chrome.storage.local.set({ [RECENTS_KEY]: validRecents });
+    }
+
+    for (const folderId of validRecents) {
+      chrome.contextMenus.create({
+        id: `zp_save_recent_${folderId}`,
+        parentId: "zp_save_root",
+        title: computeFolderLabel(folderId, state.folders),
+        contexts: ["page", "selection"],
+      });
+    }
+
+    chrome.contextMenus.create({
+      id: "zp_save_more",
       parentId: "zp_save_root",
-      title: computeFolderLabel(folderId, state.folders),
+      title: "More\u2026",
+      contexts: ["page", "selection"],
+    });
+  } catch (err) {
+    console.error("[ZeroPin] rebuildContextMenus failed:", err);
+    // Fallback: minimal static menu so the extension remains usable
+    chrome.contextMenus.create({
+      id: "zp_save_root",
+      title: "Save to ZeroPin",
       contexts: ["page", "selection"],
     });
   }
-
-  chrome.contextMenus.create({
-    id: "zp_save_more",
-    parentId: "zp_save_root",
-    title: "More\u2026",
-    contexts: ["page", "selection"],
-  });
 }
 
 // ── Reminder helpers ──────────────────────────────────────────────────────────
@@ -173,12 +193,12 @@ async function handleClick(info: chrome.contextMenus.OnClickData, tab?: chrome.t
     if (id === "zp_save_more") {
       let anchor: any;
       if (info.selectionText && tab?.id != null) {
-        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
+        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: MSG.CAPTURE_ANCHOR });
         anchor = r?.anchor;
       }
       let ytResult: any;
       if (tab?.id != null && isYouTubeWatchUrl(url)) {
-        ytResult = await sendMessage(tab.id, { type: "ZP_CAPTURE_YT_MOMENT" });
+        ytResult = await sendMessage(tab.id, { type: MSG.CAPTURE_YT_MOMENT });
       }
       const pending: PendingSave = {
         id: crypto.randomUUID(),
@@ -220,7 +240,7 @@ async function saveWithFolder(
     let anchor: any;
     if (tab?.id != null) {
       try {
-        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: "ZP_CAPTURE_ANCHOR" });
+        const r = await sendMessage<{ anchor?: any }>(tab.id, { type: MSG.CAPTURE_ANCHOR });
         anchor = r?.anchor;
       } catch { /* fallback */ }
     }
@@ -242,7 +262,7 @@ async function finishSave(tabId: number | undefined, folderId: string, defaultMe
   const folderName = state.folders[folderId]?.name ?? "folder";
   const base = defaultMessage ?? `Saved to ${folderName}`;
   const message = dupFolderName ? `Already pinned in "${dupFolderName}" — ${base}` : base;
-  void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message });
+  void sendMessage(tabId, { type: MSG.SHOW_SAVE_CONFIRM, message });
 }
 
 // ── YouTube-aware page save ───────────────────────────────────────────────────
@@ -266,9 +286,9 @@ async function savePagePossiblyWithYouTube(
     await addPageBookmark(url, title, undefined, folderId);
     if (tabId != null && folderId) {
       const folderName = stateForDup.folders[folderId]?.name ?? "folder";
-      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: withDup(`Saved to ${folderName}`) });
+      void sendMessage(tabId, { type: MSG.SHOW_SAVE_CONFIRM, message: withDup(`Saved to ${folderName}`) });
     } else if (tabId != null) {
-      void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: withDup("Saved page") });
+      void sendMessage(tabId, { type: MSG.SHOW_SAVE_CONFIRM, message: withDup("Saved page") });
     }
     return;
   }
@@ -279,7 +299,7 @@ async function savePagePossiblyWithYouTube(
   let toastMessage = folderId ? undefined : withDup("Saved page");
 
   if (tabId != null) {
-    const result = await sendMessage<YouTubeCaptureResult>(tabId, { type: "ZP_CAPTURE_YT_MOMENT" });
+    const result = await sendMessage<YouTubeCaptureResult>(tabId, { type: MSG.CAPTURE_YT_MOMENT });
 
     if (result?.kind === "youtube") {
       media = {
@@ -303,7 +323,7 @@ async function savePagePossiblyWithYouTube(
       toastMessage = withDup(`Saved to ${folderName}`);
     }
 
-    void sendMessage(tabId, { type: "ZP_SHOW_SAVE_CONFIRM", message: toastMessage });
+    void sendMessage(tabId, { type: MSG.SHOW_SAVE_CONFIRM, message: toastMessage });
   }
 
   await addPageBookmark(saveUrl, title, media, folderId);
@@ -335,7 +355,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
     if (tab?.id != null) {
       payload = await sendMessage<{ hasSelection?: boolean; selectedText?: string; anchor?: any }>(
         tab.id,
-        { type: "ZP_GET_SELECTION_PAYLOAD" }
+        { type: MSG.GET_SELECTION_PAYLOAD }
       );
     }
 
@@ -366,7 +386,7 @@ async function handlePinIt(tab?: chrome.tabs.Tab) {
 // ── Message listener ──────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
-  if (request.type === "ZP_ANCHOR_RESOLVED") {
+  if (request.type === MSG.ANCHOR_RESOLVED) {
     const { bookmarkId, confidence, repair } = request;
     if (bookmarkId && confidence != null) {
       recordAnchorResolution(bookmarkId, confidence, repair)
@@ -382,13 +402,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     sendResponse({ success: false, reason: "Missing bookmarkId or confidence" });
   }
 
-  if (request.type === "ZP_FOLDERS_CHANGED") {
+  if (request.type === MSG.FOLDERS_CHANGED) {
     void rebuildContextMenus();
     sendResponse({ ok: true });
     return false;
   }
 
-  if (request.type === "ZP_REMINDERS_CHANGED") {
+  if (request.type === MSG.REMINDERS_CHANGED) {
     void updateReminderBadge();
     sendResponse({ ok: true });
     return false;

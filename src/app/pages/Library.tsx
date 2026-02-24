@@ -1,9 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { getPrefs, setPrefs, type Prefs } from "../../core/storage/prefs";
+import { setPrefs, type Prefs } from "../../core/storage/prefs";
 import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder, updateDeadLinkResults } from "../../core/storage/local";
-import { suggestTagIds } from "../../core/aiTags";
-import { getPendingSave, setPendingSave, updateRecents } from "../../core/storage/recents";
-import type { PendingSave } from "../../core/storage/recents";
+import { setPendingSave, updateRecents } from "../../core/storage/recents";
+import { useLibraryState } from "../hooks/useLibraryState";
 import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
 import type { BrowserImportPreview } from "../../core/storage/importBrowser";
 import type { LibraryState, Bookmark, Folder, TagDef } from "../../core/types";
@@ -1606,8 +1605,24 @@ function RenameDialogBody({
 export default function Library() {
   const { showToast } = useToast();
   const { isDark } = useTheme();
-  const [state, setState] = useState<LibraryState | null>(null);
-  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const {
+    state,
+    setState,
+    refreshState,
+    activeFolderId,
+    setActiveFolderId,
+    prefs,
+    setPrefsState,
+    prefsDraft,
+    setPrefsDraft,
+    isPickerMode,
+    pendingSave,
+    setPendingSaveState,
+    pickerSuggestedIds,
+    pickerTagIds,
+    setPickerTagIds,
+  } = useLibraryState();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [searchWithinFolder, setSearchWithinFolder] = useState(false);
   const [isFolderModalOpen, setFolderModalOpen] = useState(false);
@@ -1636,16 +1651,9 @@ export default function Library() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [tagsExpanded, setTagsExpanded] = useState(true);
-  const defaultPrefs: Prefs = { highlightDurationMs: 3000, snippetDismissMs: 12000, reminderNotificationEnabled: false, reminderNotificationHour: 9, unreadTrackingEnabled: false, unreadThresholdDays: 60 };
-  const [prefs, setPrefsState] = useState<Prefs>(defaultPrefs);
-  const [prefsDraft, setPrefsDraft] = useState<Prefs>(defaultPrefs);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingDivider = useRef(false);
 
-  const isPickerMode = new URLSearchParams(window.location.search).get("mode") === "picker";
-  const [pendingSave, setPendingSaveState] = useState<PendingSave | null>(null);
-  const [pickerSuggestedIds, setPickerSuggestedIds] = useState<string[]>([]);
-  const [pickerTagIds, setPickerTagIds] = useState<string[]>([]);
   const [remindersCollapsed, setRemindersCollapsed] = useState(false);
   const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter | null>(null);
   const [deadLinkChecking, setDeadLinkChecking] = useState(false);
@@ -1653,45 +1661,6 @@ export default function Library() {
   const [deadLinkTotal, setDeadLinkTotal] = useState(0);
   const [showDeadLinkModal, setShowDeadLinkModal] = useState(false);
   const [deadLinkModalResult, setDeadLinkModalResult] = useState<{ dead: number; total: number } | null>(null);
-
-  useEffect(() => {
-    getPrefs().then((p) => { setPrefsState(p); setPrefsDraft(p); });
-    getState().then((s) => {
-      setState(s);
-      const params = new URLSearchParams(window.location.search);
-      const folderParam = params.get("folder");
-      if (folderParam && s.folders[folderParam]) {
-        setActiveFolderId(folderParam);
-      } else {
-        setActiveFolderId(s.rootFolderId);
-      }
-    });
-
-    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area === "local" && changes["zp_state"]) {
-        const newState = changes["zp_state"].newValue as LibraryState;
-        setState(newState);
-        setActiveFolderId((prev) => prev ?? newState.rootFolderId);
-      }
-    };
-
-    chrome.storage.onChanged.addListener(onChanged);
-    return () => chrome.storage.onChanged.removeListener(onChanged);
-  }, []);
-
-  useEffect(() => {
-    if (!isPickerMode) return;
-    getPendingSave().then((p) => setPendingSaveState(p));
-  }, [isPickerMode]);
-
-  useEffect(() => {
-    if (!pendingSave || !state) return;
-    suggestTagIds(
-      { url: pendingSave.url, title: pendingSave.title, snippet: pendingSave.selectionText },
-      state.tagDefs ?? {}
-    ).then(setPickerSuggestedIds);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSave?.id, state?.schemaVersion]);
 
   // Global ? shortcut for shortcuts cheat-sheet
   useEffect(() => {
@@ -1821,11 +1790,6 @@ export default function Library() {
     activeTagFilter,
     dashboardFilter,
   });
-
-  const refreshState = async () => {
-    const s = await getState();
-    setState(s);
-  };
 
   /* ─── Handlers ─────────────────────────────────────────────── */
 

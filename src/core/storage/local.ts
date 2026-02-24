@@ -7,6 +7,27 @@ const KEY = "zp_state";
 const OLD_KEY = "zr_library_state";
 const now = () => Date.now();
 
+let _writeQueue: Promise<void> = Promise.resolve();
+function enqueueWrite(fn: () => Promise<void>): Promise<void> {
+  _writeQueue = _writeQueue.then(fn, fn); // always advance queue even on error
+  return _writeQueue;
+}
+
+function extractDomain(url: string): string {
+  try { return new URL(url).hostname; }
+  catch { return ""; }
+}
+
+function findExistingBookmark(
+  bookmarks: LibraryState["bookmarks"],
+  folderId: string,
+  snippetHash: string
+) {
+  return Object.values(bookmarks).find(
+    (b) => b.folderId === folderId && b.snippetHash === snippetHash
+  );
+}
+
 export async function getState(): Promise<LibraryState> {
   let state = await storageGet<LibraryState>(KEY);
 
@@ -55,8 +76,8 @@ export async function getState(): Promise<LibraryState> {
   return initial;
 }
 
-export async function setState(next: LibraryState): Promise<void> {
-  await storageSet(KEY, next);
+export function setState(next: LibraryState): Promise<void> {
+  return enqueueWrite(() => storageSet(KEY, next));
 }
 
 /** Normalize a URL for dedup: lowercase, strip trailing slash and fragment. */
@@ -97,9 +118,7 @@ export async function addPageBookmark(url: string, title: string, media?: Bookma
   const hash = computeSnippetHash(url);
 
   // Dedup: check for existing bookmark with same hash in same folder
-  const existing = Object.values(state.bookmarks).find(
-    (b) => b.folderId === folderId && b.snippetHash === hash
-  );
+  const existing = findExistingBookmark(state.bookmarks, folderId, hash);
   if (existing) {
     existing.updatedAt = now();
     await setState(state);
@@ -107,13 +126,7 @@ export async function addPageBookmark(url: string, title: string, media?: Bookma
   }
 
   const id = crypto.randomUUID();
-  const domain = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "";
-    }
-  })();
+  const domain = extractDomain(url);
 
   const ts = now();
   state.bookmarks[id] = {
@@ -182,9 +195,7 @@ export async function addSelectionBookmark(input: {
   const hash = computeSnippetHash(input.url, input.selectedText);
 
   // Dedup: check for existing bookmark with same hash in same folder
-  const existing = Object.values(state.bookmarks).find(
-    (b) => b.folderId === folderId && b.snippetHash === hash
-  );
+  const existing = findExistingBookmark(state.bookmarks, folderId, hash);
   if (existing) {
     existing.updatedAt = now();
     await setState(state);
@@ -192,13 +203,7 @@ export async function addSelectionBookmark(input: {
   }
 
   const id = crypto.randomUUID();
-  const domain = (() => {
-    try {
-      return new URL(input.url).hostname;
-    } catch {
-      return "";
-    }
-  })();
+  const domain = extractDomain(input.url);
 
   const ts = now();
   

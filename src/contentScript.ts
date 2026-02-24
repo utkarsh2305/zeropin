@@ -483,30 +483,38 @@ function findBestFuzzyMatch(
 
 // ── Stage C: AI chat structural anchor ──
 
-function findByChatContext(
-  text: string,
-  chatContext: NonNullable<SnippetAnchor["chatContext"]>,
-): Range | null {
-  // Try to find the specific message container
+function findMessageContainer(chatContext: {
+  platform: string;
+  messageId?: string;
+  messageIndex?: number;
+}): Element | null {
   let messageEl: Element | null = null;
 
   if (chatContext.platform === "chatgpt" && chatContext.messageId) {
     messageEl = document.querySelector(`[data-message-id="${CSS.escape(chatContext.messageId)}"]`);
   }
-
   if (!messageEl && chatContext.platform === "claude") {
     const allMessages = document.querySelectorAll("[data-testid*='chat-message']");
     if (chatContext.messageIndex != null && chatContext.messageIndex < allMessages.length) {
       messageEl = allMessages[chatContext.messageIndex];
     }
   }
-
   if (!messageEl && chatContext.platform === "chatgpt") {
     const allMessages = document.querySelectorAll("[data-message-id]");
     if (chatContext.messageIndex != null && chatContext.messageIndex < allMessages.length) {
       messageEl = allMessages[chatContext.messageIndex];
     }
   }
+
+  return messageEl;
+}
+
+function findByChatContext(
+  text: string,
+  chatContext: NonNullable<SnippetAnchor["chatContext"]>,
+): Range | null {
+  // Try to find the specific message container
+  let messageEl: Element | null = findMessageContainer(chatContext);
 
   // Generic fallback: try by messageIndex with common selectors
   if (!messageEl && chatContext.messageIndex != null) {
@@ -727,21 +735,7 @@ function highlightSnippet(anchor: SnippetAnchor | undefined): HighlightResult {
   if (anchor.chatContext) {
     let messageEl: Element | null = null;
 
-    if (anchor.chatContext.platform === "chatgpt" && anchor.chatContext.messageId) {
-      messageEl = document.querySelector(`[data-message-id="${CSS.escape(anchor.chatContext.messageId)}"]`);
-    }
-    if (!messageEl && anchor.chatContext.platform === "claude") {
-      const allMessages = document.querySelectorAll("[data-testid*='chat-message']");
-      if (anchor.chatContext.messageIndex != null && anchor.chatContext.messageIndex < allMessages.length) {
-        messageEl = allMessages[anchor.chatContext.messageIndex];
-      }
-    }
-    if (!messageEl && anchor.chatContext.platform === "chatgpt") {
-      const allMessages = document.querySelectorAll("[data-message-id]");
-      if (anchor.chatContext.messageIndex != null && anchor.chatContext.messageIndex < allMessages.length) {
-        messageEl = allMessages[anchor.chatContext.messageIndex];
-      }
-    }
+    messageEl = findMessageContainer(anchor.chatContext);
 
     if (messageEl) {
       const result = runStages(anchor, messageEl, 0.05);

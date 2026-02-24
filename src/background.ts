@@ -29,7 +29,7 @@ function tabsGet(tabId: number): Promise<chrome.tabs.Tab> {
 
 function sendMessage<T>(
   tabId: number,
-  message: any
+  message: Record<string, unknown>
 ): Promise<T | undefined> {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {

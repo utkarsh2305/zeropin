@@ -1275,6 +1275,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
             url: b.url,
             anchor: b.snippet,
             bookmarkId: b.id,
+            // eslint-disable-next-line react-hooks/purity
             timestamp: Date.now(),
           },
         },
@@ -2162,6 +2163,7 @@ export default function Library() {
             url: b.url,
             anchor: b.snippet,
             bookmarkId: b.id,
+            // eslint-disable-next-line react-hooks/purity
             timestamp: Date.now(),
           },
         },

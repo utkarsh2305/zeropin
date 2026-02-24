@@ -158,8 +158,8 @@ export function jaroWinklerSimilarity(a: string, b: string): number {
   const maxLen = Math.max(a.length, b.length);
   const matchDistance = Math.floor(maxLen / 2) - 1;
 
-  let aMatches: boolean[] = Array(a.length).fill(false);
-  let bMatches: boolean[] = Array(b.length).fill(false);
+  const aMatches: boolean[] = Array(a.length).fill(false);
+  const bMatches: boolean[] = Array(b.length).fill(false);
 
   let matches = 0;
   let transpositions = 0;

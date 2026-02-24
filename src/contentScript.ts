@@ -597,7 +597,6 @@ function findByFingerprint(
 
 // ── Confidence thresholds ──
 
-const CONFIDENCE_HIGH = 0.75;
 const CONFIDENCE_LOW = 0.5;
 
 // ── Run stages A-F scoped to a given root node ──
@@ -1020,9 +1019,6 @@ function highlightAndScroll(result: HighlightResult): void {
     }
     showLowConfidenceNotice();
     return;
-  }
-
-  if (result.confidence < CONFIDENCE_HIGH) {
   }
 
   try {

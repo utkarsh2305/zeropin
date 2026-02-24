@@ -88,6 +88,7 @@ function Popup() {
             url: b.url,
             anchor: b.snippet,
             bookmarkId: b.id,
+            // eslint-disable-next-line react-hooks/purity
             timestamp: Date.now(),
           },
         },
@@ -185,7 +186,7 @@ function Popup() {
             <span className="text-muted-foreground text-sm shrink-0">Folder:</span>
             <Select
               value={currentFolder?.id ?? ""}
-              onValueChange={async (id) => { try { await setLastUsedFolder(id); } catch {} }}
+              onValueChange={async (id) => { try { await setLastUsedFolder(id); } catch { /* ignore */ } }}
             >
               <SelectTrigger className="h-7 text-sm flex-1 border-none shadow-none px-1 focus:ring-0 focus:ring-offset-0">
                 <SelectValue />

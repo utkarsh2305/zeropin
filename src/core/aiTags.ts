@@ -1,5 +1,18 @@
 import type { TagDef, TagId } from "./types";
 
+// Gemini Nano browser API types (subset we use)
+interface GeminiNanoCapabilities { available: "no" | "readily" | "after-download" }
+interface GeminiNanoSession { prompt(p: string): Promise<string>; destroy(): void }
+interface GeminiNanoLanguageModel {
+  capabilities(): Promise<GeminiNanoCapabilities>;
+  create(opts: { systemPrompt: string }): Promise<GeminiNanoSession>;
+}
+interface GeminiNanoAI { languageModel?: GeminiNanoLanguageModel }
+
+const NANO_CAPABILITIES_TIMEOUT_MS = 2000;
+const NANO_CREATE_TIMEOUT_MS = 3000;
+const NANO_PROMPT_TIMEOUT_MS = 3000;
+
 export interface SuggestInput {
   url: string;
   title: string;
@@ -31,10 +44,10 @@ async function tryGeminiNano(
   tagList: TagDef[]
 ): Promise<TagId[]> {
   try {
-    const ai = (window as any).ai;
+    const ai = (window as unknown as { ai?: GeminiNanoAI }).ai;
     if (!ai?.languageModel) return [];
 
-    const cap = await withTimeout(ai.languageModel.capabilities(), 2000) as any;
+    const cap = await withTimeout(ai.languageModel.capabilities(), NANO_CAPABILITIES_TIMEOUT_MS);
     if (!cap || cap.available === "no") return [];
 
     const tagNames = tagList.map((t) => t.name).join(", ");
@@ -44,15 +57,15 @@ async function tryGeminiNano(
           "You suggest bookmark tags. Given a title and URL, return 2-4 relevant tags " +
           "chosen ONLY from the provided list. Output only the tag names, comma-separated, lowercase. No explanation.",
       }),
-      3000
-    ) as any;
+      NANO_CREATE_TIMEOUT_MS
+    );
 
     const prompt =
       `Title: "${input.title}"\nURL: ${input.url}` +
       (input.snippet ? `\nSnippet: "${input.snippet.slice(0, 200)}"` : "") +
       `\nAvailable tags: ${tagNames}`;
 
-    const response: string = await withTimeout(session.prompt(prompt), 3000);
+    const response = await withTimeout(session.prompt(prompt), NANO_PROMPT_TIMEOUT_MS);
     session.destroy();
 
     const suggested = response

@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { setPrefs, type Prefs } from "../../core/storage/prefs";
-import { getState, setLastUsedFolder, deleteBookmark, createFolder, exportState, importState, renameFolder, deleteFolderCascade, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, setFolderColor, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder, updateDeadLinkResults } from "../../core/storage/local";
+import { getState, deleteBookmark, exportState, importState, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder, updateDeadLinkResults } from "../../core/storage/local";
 import { setPendingSave, updateRecents } from "../../core/storage/recents";
 import { useLibraryState } from "../hooks/useLibraryState";
+import { useFolderOps, notifyFoldersChanged } from "../hooks/useFolderOps";
+import type { ConfirmDialogState } from "../hooks/useFolderOps";
 import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
 import type { BrowserImportPreview } from "../../core/storage/importBrowser";
 import type { LibraryState, Bookmark, Folder, TagDef } from "../../core/types";
@@ -1551,24 +1553,6 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 
 /* ─── Library (main component) ──────────────────────────────────── */
 
-function countFolderContents(
-  folders: Record<string, Folder>,
-  bookmarks: Record<string, Bookmark>,
-  folderId: string,
-): { bookmarkCount: number; childFolderCount: number } {
-  const descendants = new Set<string>();
-  const collect = (id: string) => {
-    for (const f of Object.values(folders)) {
-      if (f.parentId === id) { descendants.add(f.id); collect(f.id); }
-    }
-  };
-  collect(folderId);
-  const bookmarkCount = Object.values(bookmarks).filter(
-    (b) => b.folderId === folderId || descendants.has(b.folderId),
-  ).length;
-  return { bookmarkCount, childFolderCount: descendants.size };
-}
-
 function RenameDialogBody({
   initialValue,
   onCommit,
@@ -1625,8 +1609,6 @@ export default function Library() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchWithinFolder, setSearchWithinFolder] = useState(false);
-  const [isFolderModalOpen, setFolderModalOpen] = useState(false);
-  const [folderNameDraft, setFolderNameDraft] = useState("");
   const [expandedNotes, setExpandedNotes] = useState<Record<string, { open: boolean; draft: string }>>({});
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1636,11 +1618,7 @@ export default function Library() {
   const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [browserImportPreview, setBrowserImportPreview] = useState<BrowserImportPreview | null>(null);
   const [includeDups, setIncludeDups] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState<{
-    title: string;
-    description: string;
-    onConfirm: () => Promise<void>;
-  } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [renameDialog, setRenameDialog] = useState<{
     title: string;
     currentName: string;
@@ -1767,22 +1745,19 @@ export default function Library() {
     };
   }, []);
 
-  if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
+  // Hooks must be called before any conditional return.
+  // Use a null-safe state for hook calls that require non-null state.
+  const _safeState = state ?? ({
+    bookmarks: {},
+    folders: {},
+    tagDefs: {},
+    rootFolderId: "",
+    schemaVersion: 0,
+  } as unknown as LibraryState);
 
-  const currentFolderId = activeFolderId ?? state.rootFolderId;
+  const _currentFolderId = state ? (activeFolderId ?? state.rootFolderId) : "";
 
-  const {
-    allBookmarks,
-    dueBookmarks,
-    filtered,
-    unreadBookmarks,
-    deadLinkBookmarks,
-    emptyFolderList,
-    emptyFolderIds,
-    sortedTagDefs,
-    rootFolderCount,
-    isSearching,
-  } = useFilterPipeline(state, prefs, {
+  const pipeline = useFilterPipeline(_safeState, prefs, {
     searchQuery,
     sourceFilter,
     dateFrom,
@@ -1790,79 +1765,6 @@ export default function Library() {
     activeTagFilter,
     dashboardFilter,
   });
-
-  /* ─── Handlers ─────────────────────────────────────────────── */
-
-  const handleCreateFolder = () => { setFolderNameDraft(""); setFolderModalOpen(true); };
-
-  const handleCreateFolderSubmit = async () => {
-    const name = folderNameDraft.trim();
-    if (!name) return;
-    try {
-      await createFolder({ parentId: currentFolderId, name });
-      await refreshState();
-      setFolderModalOpen(false);
-      setFolderNameDraft("");
-      showToast(`Folder "${name}" created`);
-      notifyFoldersChanged();
-    } catch (err) {
-      console.error("Failed to create folder", err);
-      showToast("Failed to create folder", "error");
-    }
-  };
-
-  const handleDeleteBookmark = (id: string) => {
-    setConfirmDialog({
-      title: "Delete bookmark?",
-      description: "This cannot be undone.",
-      onConfirm: async () => {
-        await deleteBookmark(id);
-        chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
-        await refreshState();
-        showToast("Bookmark deleted");
-      },
-    });
-  };
-
-  const handleSelectFolder = async (id: string) => {
-    setActiveFolderId(id);
-    setDashboardFilter(null);
-    if (isPickerMode && pendingSave) {
-      await handlePickerSave(id);
-    } else {
-      try { await setLastUsedFolder(id); } catch { /* no-op */ }
-    }
-  };
-
-  const handleCheckDeadLinks = async () => {
-    if (deadLinkChecking) return;
-    const bookmarkList = Object.values(state.bookmarks);
-    if (bookmarkList.length === 0) return;
-    setDeadLinkChecking(true);
-    setDeadLinkProgress(0);
-    setDeadLinkTotal(bookmarkList.length);
-    showToast("Checking your links in the background — keep using ZeroPin as normal. We'll let you know when it's done.", "info");
-    const BATCH = 10;
-    const deadIds: string[] = [];
-    for (let i = 0; i < bookmarkList.length; i += BATCH) {
-      const batch = bookmarkList.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (b) => {
-        try {
-          const res = await fetch(b.url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
-          if (res.status === 404 || res.status === 410) deadIds.push(b.id);
-        } catch { /* timeout / CORS / network error = treat as working */ }
-      }));
-      setDeadLinkProgress(Math.min(i + BATCH, bookmarkList.length));
-      if (i + BATCH < bookmarkList.length) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-    await updateDeadLinkResults(bookmarkList.map((b) => ({ id: b.id, isDeadLink: deadIds.includes(b.id) })));
-    setDeadLinkChecking(false);
-    setDeadLinkModalResult({ dead: deadIds.length, total: bookmarkList.length });
-    setShowDeadLinkModal(true);
-    await refreshState();
-  };
 
   const handlePickerSave = async (folderId: string) => {
     if (!pendingSave) return;
@@ -1909,51 +1811,93 @@ export default function Library() {
     }
   };
 
-  function notifyFoldersChanged() {
-    chrome.runtime.sendMessage({ type: "ZP_FOLDERS_CHANGED" }).catch(() => {});
-  }
+  const folderOps = useFolderOps({
+    state: _safeState,
+    refreshState,
+    showToast,
+    activeFolderId,
+    setActiveFolderId,
+    currentFolderId: _currentFolderId,
+    isPickerMode,
+    pendingSave,
+    onPickerSave: handlePickerSave,
+    setConfirmDialog,
+    setDashboardFilter,
+  });
 
-  const handleRenameFolder = async (id: string, name: string) => {
-    try {
-      await renameFolder(id, name);
-      await refreshState();
-      showToast("Folder renamed");
-      notifyFoldersChanged();
-    } catch (err) {
-      console.error("Failed to rename folder", err);
-      showToast("Failed to rename folder", "error");
-    }
-  };
+  // ── Early return after all hooks ────────────────────────────────────────────
+  if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
 
-  const handleDeleteFolder = (id: string) => {
-    const folder = state.folders[id];
-    if (!folder) return;
-    const { bookmarkCount, childFolderCount } = countFolderContents(state.folders, state.bookmarks, id);
-    const isEmpty = bookmarkCount === 0 && childFolderCount === 0;
-    const description = isEmpty
-      ? "This action cannot be undone."
-      : `This folder contains ${bookmarkCount} bookmark(s) and ${childFolderCount} subfolder(s). All will be permanently deleted.`;
+  const currentFolderId = _currentFolderId;
+  const {
+    allBookmarks,
+    dueBookmarks,
+    filtered,
+    unreadBookmarks,
+    deadLinkBookmarks,
+    emptyFolderList,
+    emptyFolderIds,
+    sortedTagDefs,
+    rootFolderCount,
+    isSearching,
+  } = pipeline;
+
+  const {
+    isFolderModalOpen,
+    setFolderModalOpen,
+    folderNameDraft,
+    setFolderNameDraft,
+    handleCreateFolder,
+    handleCreateFolderSubmit,
+    handleSelectFolder,
+    handleRenameFolder,
+    handleDeleteFolder,
+    handleSetFolderColor,
+  } = folderOps;
+
+  /* ─── Handlers ─────────────────────────────────────────────── */
+
+  const handleDeleteBookmark = (id: string) => {
     setConfirmDialog({
-      title: `Delete "${folder.name}"?`,
-      description,
+      title: "Delete bookmark?",
+      description: "This cannot be undone.",
       onConfirm: async () => {
-        await deleteFolderCascade(id);
-        if (currentFolderId === id) setActiveFolderId(state.rootFolderId);
+        await deleteBookmark(id);
+        chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
         await refreshState();
-        showToast("Folder deleted");
-        notifyFoldersChanged();
+        showToast("Bookmark deleted");
       },
     });
   };
 
-  const handleSetFolderColor = async (id: string, color: string | undefined) => {
-    try {
-      await setFolderColor(id, color);
-      await refreshState();
-      notifyFoldersChanged();
-    } catch (err) {
-      console.error("Failed to set folder color", err);
+  const handleCheckDeadLinks = async () => {
+    if (deadLinkChecking) return;
+    const bookmarkList = Object.values(state.bookmarks);
+    if (bookmarkList.length === 0) return;
+    setDeadLinkChecking(true);
+    setDeadLinkProgress(0);
+    setDeadLinkTotal(bookmarkList.length);
+    showToast("Checking your links in the background — keep using ZeroPin as normal. We'll let you know when it's done.", "info");
+    const BATCH = 10;
+    const deadIds: string[] = [];
+    for (let i = 0; i < bookmarkList.length; i += BATCH) {
+      const batch = bookmarkList.slice(i, i + BATCH);
+      await Promise.all(batch.map(async (b) => {
+        try {
+          const res = await fetch(b.url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+          if (res.status === 404 || res.status === 410) deadIds.push(b.id);
+        } catch { /* timeout / CORS / network error = treat as working */ }
+      }));
+      setDeadLinkProgress(Math.min(i + BATCH, bookmarkList.length));
+      if (i + BATCH < bookmarkList.length) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
     }
+    await updateDeadLinkResults(bookmarkList.map((b) => ({ id: b.id, isDeadLink: deadIds.includes(b.id) })));
+    setDeadLinkChecking(false);
+    setDeadLinkModalResult({ dead: deadIds.length, total: bookmarkList.length });
+    setShowDeadLinkModal(true);
+    await refreshState();
   };
 
   const handleRenameBookmark = async (id: string, name: string) => {

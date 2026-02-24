@@ -1730,6 +1730,7 @@ export default function Library() {
       description: "This cannot be undone.",
       onConfirm: async () => {
         await deleteBookmark(id);
+        chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
         await refreshState();
         showToast("Bookmark deleted");
       },
@@ -2367,6 +2368,7 @@ export default function Library() {
                 description: "This cannot be undone.",
                 onConfirm: async () => {
                   await bulkDeleteBookmarks(Array.from(selectedIds));
+                  chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
                   setSelectedIds(new Set());
                   setBulkMode(false);
                   await refreshState();

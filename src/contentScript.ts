@@ -1421,11 +1421,16 @@ function startMutationRetry(anchor: SnippetAnchor, bookmarkId?: string): void {
     if (debounceHandle) clearTimeout(debounceHandle);
     debounceHandle = setTimeout(() => {
       if (done) return;
-      const retry = highlightSnippet(anchor);
-      if (retry.found) {
-        highlightAndScroll(retry);
-        sendResolution(retry, anchor, bookmarkId);
-        finish(true);
+      try {
+        const retry = highlightSnippet(anchor);
+        if (retry.found) {
+          highlightAndScroll(retry);
+          sendResolution(retry, anchor, bookmarkId);
+          finish(true);
+        }
+      } catch (err) {
+        console.warn("[ZeroPin] highlightSnippet threw in MutationObserver, aborting retry:", err);
+        finish(false);
       }
     }, MUTATION_DEBOUNCE_MS);
   });

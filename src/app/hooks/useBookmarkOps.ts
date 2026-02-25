@@ -88,6 +88,8 @@ export interface BookmarkOpsResult {
   handleExport: () => Promise<void>;
   handleImport: (file: File) => Promise<void>;
   handleToggleFavorite: (id: string) => Promise<void>;
+  handleBulkAddTags: (tagIds: string[]) => Promise<void>;
+  handleBulkRemoveTags: (tagIds: string[]) => Promise<void>;
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -490,6 +492,46 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     await refreshState();
   };
 
+  const handleBulkAddTags = async (tagIds: string[]) => {
+    if (tagIds.length === 0) return;
+    const count = selectedIds.size;
+    try {
+      for (const id of selectedIds) {
+        const bookmark = state.bookmarks[id];
+        if (!bookmark) continue;
+        const merged = Array.from(new Set([...(bookmark.tags ?? []), ...tagIds]));
+        await setBookmarkTags(id, merged);
+      }
+      setSelectedIds(new Set());
+      setBulkMode(false);
+      await refreshState();
+      showToast(`Tags added to ${count} bookmark${count !== 1 ? "s" : ""}`);
+    } catch (err) {
+      console.error("Failed to bulk add tags", err);
+      showToast("Failed to add tags", "error");
+    }
+  };
+
+  const handleBulkRemoveTags = async (tagIds: string[]) => {
+    if (tagIds.length === 0) return;
+    const count = selectedIds.size;
+    try {
+      for (const id of selectedIds) {
+        const bookmark = state.bookmarks[id];
+        if (!bookmark) continue;
+        const remaining = (bookmark.tags ?? []).filter((t: string) => !tagIds.includes(t));
+        await setBookmarkTags(id, remaining);
+      }
+      setSelectedIds(new Set());
+      setBulkMode(false);
+      await refreshState();
+      showToast(`Tags removed from ${count} bookmark${count !== 1 ? "s" : ""}`);
+    } catch (err) {
+      console.error("Failed to bulk remove tags", err);
+      showToast("Failed to remove tags", "error");
+    }
+  };
+
   return {
     expandedNotes,
     setExpandedNotes,
@@ -523,5 +565,7 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     handleExport,
     handleImport,
     handleToggleFavorite,
+    handleBulkAddTags,
+    handleBulkRemoveTags,
   };
 }

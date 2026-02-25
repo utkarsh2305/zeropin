@@ -37,6 +37,8 @@ export interface Folder {
   createdAt: number;
   updatedAt: number;
   color?: string;
+  /** Emoji character used as the folder icon, e.g. "✈️". Absent = default folder icon. */
+  icon?: string;
 }
 
 export interface Bookmark {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { setPrefs } from "../../core/storage/prefs";
 import { createTag, deleteTag, recordBookmarkOpen, bulkDeleteBookmarks, bulkMoveBookmarks } from "../../core/storage/local";
 import { suggestTagIds } from "../../core/aiTags";
@@ -23,9 +23,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen, Heart, StickyNote } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen, Heart, StickyNote } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -77,6 +76,47 @@ const FOLDER_COLORS: Record<string, { light: string; dark: string } | null> = {
   white:  { light: "#9ca3af", dark: "#f9fafb" },
 };
 
+// Curated emoji for folder icons — covers common personal + professional themes
+const FOLDER_EMOJIS = [
+  "🗂️", "📚", "💼", "🎨", "🔬", "🏠", "✈️", "🌿",
+  "📝", "🎯", "🔑", "💡", "📦", "🎵", "🌍", "⚡",
+  "🏋️", "💰", "🎮", "🍕", "🔒", "📊", "🎬", "🌟",
+  "🛒", "🏥", "🎓", "💻", "📱", "🔧", "🚀", "❤️",
+];
+
+// Searchable emoji dataset — { e: emoji, k: space-separated keywords }
+const EMOJI_SEARCH_DATA: { e: string; k: string }[] = [
+  { e: "🗂️", k: "folder files organize archive" }, { e: "📁", k: "folder directory" }, { e: "📂", k: "folder open" },
+  { e: "📚", k: "books reading library study learn education" }, { e: "📖", k: "book reading open" }, { e: "📝", k: "notes writing memo text journal" },
+  { e: "💼", k: "work briefcase business job career" }, { e: "🏢", k: "office company work business" }, { e: "🤝", k: "contacts people network team clients" },
+  { e: "🎨", k: "art creative design paint color" }, { e: "🖼️", k: "images gallery art pictures photos" }, { e: "✏️", k: "pen drawing writing edit" },
+  { e: "🔬", k: "science research lab microscope" }, { e: "🧪", k: "experiment test lab chemistry" }, { e: "🧬", k: "biology dna science research" },
+  { e: "🏠", k: "home house personal family" }, { e: "🏡", k: "house garden property home" }, { e: "🛋️", k: "living room home interior" },
+  { e: "✈️", k: "travel flight airplane trip vacation" }, { e: "🗺️", k: "map travel navigate location geography" }, { e: "🏖️", k: "vacation beach holiday summer" },
+  { e: "🌿", k: "nature garden plants green outdoors" }, { e: "🌱", k: "growth learning new projects garden" }, { e: "🌊", k: "ocean water nature calm" },
+  { e: "🎯", k: "goals target focus aim productivity" }, { e: "🏆", k: "goals achievement wins success" }, { e: "🚀", k: "startup launch project ambition" },
+  { e: "🔑", k: "key access important passwords" }, { e: "🔒", k: "secure private secret locked" }, { e: "🔐", k: "security private locked password" },
+  { e: "💡", k: "ideas inspiration light creativity" }, { e: "⚡", k: "fast energy quick power" }, { e: "🌟", k: "star important featured highlights" },
+  { e: "📦", k: "box package storage shipping" }, { e: "🗃️", k: "archive files storage organize" }, { e: "📌", k: "pinned important reference" },
+  { e: "🎵", k: "music audio sound song playlist" }, { e: "🎸", k: "guitar music instruments band" }, { e: "🎤", k: "podcast audio recording media" },
+  { e: "🌍", k: "world global earth geography international" }, { e: "🌐", k: "web internet links online" }, { e: "🔗", k: "links urls web resources" },
+  { e: "🏋️", k: "gym fitness health workout exercise" }, { e: "🧘", k: "wellness mindfulness health routine meditation" }, { e: "🏃", k: "running exercise fitness sport" },
+  { e: "💰", k: "money finance budget savings investment" }, { e: "📈", k: "growth charts finance stocks analytics" }, { e: "📊", k: "stats data charts analytics reports" },
+  { e: "🎮", k: "games gaming fun entertainment hobbies" }, { e: "🎬", k: "movies film video watch cinema" }, { e: "📸", k: "photos camera pictures memories" },
+  { e: "🍕", k: "food recipes cooking eat pizza" }, { e: "🍳", k: "cooking recipes kitchen meals" }, { e: "☕", k: "coffee morning routine break drinks" },
+  { e: "🛒", k: "shopping cart buy purchase store" }, { e: "🛍️", k: "shopping bags store fashion" }, { e: "🎁", k: "gifts wishlist presents shopping" },
+  { e: "🏥", k: "health medical doctor hospital care" }, { e: "💊", k: "medicine health pharmacy wellness" }, { e: "🩺", k: "doctor medical health check" },
+  { e: "🎓", k: "school university education graduation degree" }, { e: "📐", k: "design math engineering precision" }, { e: "🔭", k: "space science research astronomy" },
+  { e: "💻", k: "computer code dev programming software" }, { e: "📱", k: "phone mobile apps devices" }, { e: "🤖", k: "ai automation tech bot machine" },
+  { e: "🔧", k: "tools settings fix repair maintenance" }, { e: "⚙️", k: "settings config system preferences" }, { e: "🛠️", k: "tools build repair projects" },
+  { e: "📰", k: "news articles reading media press" }, { e: "📜", k: "documents legal contracts history" }, { e: "📋", k: "clipboard lists tasks notes" },
+  { e: "🗓️", k: "calendar schedule planning dates events" }, { e: "⏰", k: "time clock reminder schedule alarm" }, { e: "⌚", k: "time watch schedule productivity" },
+  { e: "💬", k: "chat messages social communication" }, { e: "👥", k: "team people group collaboration community" }, { e: "❤️", k: "love favorites heart personal important" },
+  { e: "🌙", k: "night dark personal private quiet" }, { e: "☀️", k: "morning bright day routine energy" }, { e: "🌈", k: "creative colorful fun inspiration" },
+  { e: "🎪", k: "events activities entertainment fun" }, { e: "🏗️", k: "projects build work construction" }, { e: "💎", k: "valuable premium important gems best" },
+  { e: "🧩", k: "puzzles problems solving games strategy" }, { e: "🦋", k: "change transformation growth personal" }, { e: "🔮", k: "future planning ideas vision" },
+];
+
 /* ─── HealthDashboard ───────────────────────────────────────────── */
 
 function HealthDashboard({
@@ -120,9 +160,9 @@ function HealthDashboard({
         <button
           onClick={onDeadLinksClick}
           title="Click to check all saved links for 404s"
-          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+          className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
         >
-          <Link2 size={11} />
+          <Link2 size={13} />
           Check links
         </button>
       </div>
@@ -135,13 +175,13 @@ function HealthDashboard({
           onClick={onUnreadClick}
           title={`Bookmarks not opened in the last ${unreadThreshold} days`}
           className={cn(
-            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
             activeFilter === "unread"
               ? "bg-primary/10 text-primary border-primary/30"
               : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
           )}
         >
-          <Clock size={11} />
+          <Clock size={13} />
           {unreadCount} unread
         </button>
       )}
@@ -149,7 +189,7 @@ function HealthDashboard({
         onClick={onDeadLinksClick}
         title={deadCount > 0 ? "URLs that returned 404 or are no longer accessible" : "Click to check all saved links for 404s"}
         className={cn(
-          "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+          "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
           deadCount > 0 && activeFilter === "deadlinks"
             ? "bg-destructive/10 text-destructive border-destructive/30"
             : deadCount > 0
@@ -157,7 +197,7 @@ function HealthDashboard({
             : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
         )}
       >
-        <Link2 size={11} />
+        <Link2 size={13} />
         {deadLinkChecking
           ? `Checking… ${deadLinkProgress}/${deadLinkTotal}`
           : deadCount > 0
@@ -169,13 +209,13 @@ function HealthDashboard({
           onClick={onEmptyFoldersClick}
           title="Folders with no bookmarks — click to highlight them in the sidebar"
           className={cn(
-            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
             activeFilter === "emptyfolders"
               ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
               : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
           )}
         >
-          <FolderOpen size={11} />
+          <FolderOpen size={13} />
           {emptyCount} empty folder{emptyCount !== 1 ? "s" : ""}
         </button>
       )}
@@ -184,13 +224,13 @@ function HealthDashboard({
           onClick={onFavoritesClick}
           title="Bookmarks marked as favourite"
           className={cn(
-            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
             activeFilter === "favorites"
               ? "bg-rose-500/10 text-rose-500 border-rose-500/30"
               : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
           )}
         >
-          <Heart size={11} />
+          <Heart size={13} />
           {favoritesCount} favourite{favoritesCount !== 1 ? "s" : ""}
         </button>
       )}
@@ -199,13 +239,13 @@ function HealthDashboard({
           onClick={onNotesClick}
           title="Bookmarks with saved notes"
           className={cn(
-            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
             activeFilter === "notes"
               ? "bg-primary/10 text-primary border-primary/30"
               : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
           )}
         >
-          <StickyNote size={11} />
+          <StickyNote size={13} />
           {notesCount} with notes
         </button>
       )}
@@ -222,13 +262,12 @@ function DroppableFolder({
   isRoot,
   hasChildren,
   isCollapsed,
-  isDark,
   children,
   onSelect,
   onToggleCollapse,
   onRename,
   onDelete,
-  onColorChange,
+  onIconChange,
   isEmptyHighlighted,
   rootFolderCount,
 }: {
@@ -238,37 +277,31 @@ function DroppableFolder({
   isRoot: boolean;
   hasChildren: boolean;
   isCollapsed: boolean;
-  isDark: boolean;
   children: React.ReactNode;
   onSelect: () => void;
   onToggleCollapse: () => void;
-  onRename: () => void;
+  onRename: (name: string) => void;
   onDelete: () => void;
-  onColorChange: (color: string | undefined) => void;
+  onIconChange: (icon: string | undefined) => void;
   isEmptyHighlighted?: boolean;
   rootFolderCount?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [emojiSearch, setEmojiSearch] = useState("");
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
 
-  // Close picker on outside click
+  // Select all text after the draft value has been populated into the input
   useEffect(() => {
-    if (!pickerOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setPickerOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [pickerOpen]);
-
-  const colorEntry = folder.color ? FOLDER_COLORS[folder.color] : null;
-  const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : undefined;
+    if (isRenaming && renameDraft) {
+      renameInputRef.current?.select();
+    }
+  }, [isRenaming, renameDraft]);
 
   useEffect(() => {
     const el = ref.current;
@@ -325,90 +358,153 @@ function DroppableFolder({
             <GripVertical size={12} />
           </span>
         )}
-        <button
-          onClick={onSelect}
-          className={cn(
-            "flex-1 flex items-center gap-1.5 text-left cursor-pointer border-none rounded-md py-1.5 text-sm transition-colors",
-            isActive
-              ? "bg-primary text-primary-foreground"
-              : "bg-transparent text-foreground hover:bg-accent/50",
-          )}
-          style={{ paddingLeft: `${6 + depth * 6}px`, paddingRight: 8 }}
-        >
-          {!isRoot && hasChildren ? (
-            <span
-              onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
-              className={cn(
-                "w-3.5 flex items-center justify-center cursor-pointer shrink-0",
-                isActive ? "text-primary-foreground" : "text-muted-foreground",
-              )}
-            >
-              {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-            </span>
-          ) : !isRoot ? (
-            <span className="w-3.5 shrink-0" />
-          ) : null}
-          <FolderIcon
-            size={14}
-            className={cn("shrink-0", isActive ? "text-primary-foreground" : !colorHex ? "text-muted-foreground" : undefined)}
-            style={!isActive && colorHex ? { color: colorHex, fill: colorHex + "4D" } : undefined}
-          />
-          <span className={cn(isEmptyHighlighted && "text-amber-500 underline decoration-amber-500/60")}>
-            {folder.name}
-          </span>
-          {isRoot && rootFolderCount !== undefined && (
-            <span className={cn("ml-1 text-[10px]", isActive ? "text-primary-foreground/70" : "text-muted-foreground")}>
-              ({rootFolderCount})
-            </span>
-          )}
-        </button>
-        {!isRoot && (
-          <div className="relative flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+        {isRenaming ? (
+          <div
+            className="flex-1 flex items-center gap-1.5 rounded-md py-2 text-sm"
+            style={{ paddingLeft: `${6 + depth * 6}px`, paddingRight: 4 }}
+          >
+            {!isRoot && <span className="w-3.5 shrink-0" />}
+            {folder.icon ? (
+              <span className="shrink-0 w-[18px] h-[18px] rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
+                {folder.icon}
+              </span>
+            ) : (
+              <FolderIcon size={14} className="shrink-0 text-muted-foreground" />
+            )}
+            <input
+              ref={renameInputRef}
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && renameDraft.trim()) { onRename(renameDraft.trim()); setIsRenaming(false); }
+                if (e.key === "Escape") setIsRenaming(false);
+              }}
+              className="flex-1 min-w-0 bg-transparent border-b border-primary outline-none text-sm py-0.5 px-0"
+            />
             <button
-              onClick={() => setPickerOpen((v) => !v)}
-              className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors"
-              title="Change color"
+              onClick={() => { if (renameDraft.trim()) { onRename(renameDraft.trim()); setIsRenaming(false); } }}
+              className="shrink-0 p-1 rounded text-primary hover:text-primary/80 transition-colors"
+              title="Confirm"
             >
-              <Palette size={12} style={colorHex ? { color: colorHex } : undefined} />
+              <Check size={12} />
             </button>
-            <button onClick={onRename} className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors" title="Rename">
+            <button
+              onClick={() => setIsRenaming(false)}
+              className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+              title="Cancel"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onSelect}
+            className={cn(
+              "flex-1 flex items-center gap-1.5 text-left cursor-pointer border-none rounded-md py-2 text-sm transition-colors",
+              isActive
+                ? "bg-primary text-primary-foreground"
+                : "bg-transparent text-foreground hover:bg-accent/50",
+            )}
+            style={{ paddingLeft: `${6 + depth * 6}px`, paddingRight: 8 }}
+          >
+            {!isRoot && hasChildren ? (
+              <span
+                onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
+                className={cn(
+                  "w-3.5 flex items-center justify-center cursor-pointer shrink-0",
+                  isActive ? "text-primary-foreground" : "text-muted-foreground",
+                )}
+              >
+                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              </span>
+            ) : !isRoot ? (
+              <span className="w-3.5 shrink-0" />
+            ) : null}
+            {folder.icon ? (
+              <span className="shrink-0 w-[18px] h-[18px] rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
+                {folder.icon}
+              </span>
+            ) : (
+              <FolderIcon
+                size={14}
+                className={cn("shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")}
+              />
+            )}
+            <span className={cn("flex-1 truncate", isEmptyHighlighted && "text-amber-500 underline decoration-amber-500/60")}>
+              {folder.name}
+            </span>
+            {isRoot && rootFolderCount !== undefined && (
+              <span className={cn("ml-1 text-xs", isActive ? "text-primary-foreground" : "text-foreground")}>
+                ({rootFolderCount})
+              </span>
+            )}
+          </button>
+        )}
+        {!isRoot && !isRenaming && (
+          <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Popover open={pickerOpen} onOpenChange={(o) => { setPickerOpen(o); if (!o) setEmojiSearch(""); }}>
+              <PopoverTrigger asChild>
+                <button
+                  className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors"
+                  title="Change icon"
+                >
+                  {folder.icon
+                    ? <span className="text-[13px] leading-none">{folder.icon}</span>
+                    : <Palette size={12} />}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent side="right" align="start" className="p-3 w-auto">
+                {/* Live preview */}
+                <div className="flex items-center gap-2 mb-2.5 pb-2.5 border-b border-border">
+                  {folder.icon
+                    ? <span className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-lg leading-none bg-muted/80">{folder.icon}</span>
+                    : <FolderIcon size={18} className="shrink-0 text-muted-foreground" />}
+                  <span className="text-sm font-medium truncate max-w-[160px]">{folder.name}</span>
+                  {folder.icon && (
+                    <button onClick={() => onIconChange(undefined)} className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors" title="Remove icon">
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+                {/* Search */}
+                <input
+                  type="text"
+                  value={emojiSearch}
+                  onChange={(e) => setEmojiSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="w-full mb-2.5 px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50"
+                />
+                {/* Emoji grid */}
+                <div className="grid grid-cols-8 gap-1 max-h-[210px] overflow-y-auto">
+                  {(emojiSearch.trim()
+                    ? EMOJI_SEARCH_DATA.filter(({ k }) => k.includes(emojiSearch.toLowerCase().trim())).map(({ e }) => e)
+                    : FOLDER_EMOJIS
+                  ).map((emoji) => (
+                    <button
+                      key={emoji}
+                      title={emoji}
+                      onClick={() => { onIconChange(folder.icon === emoji ? undefined : emoji); setPickerOpen(false); setEmojiSearch(""); }}
+                      className={cn(
+                        "w-8 h-8 flex items-center justify-center text-[17px] rounded transition-colors hover:bg-accent",
+                        folder.icon === emoji ? "bg-accent ring-1 ring-inset ring-foreground/20" : "",
+                      )}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <button
+              onClick={(e) => { e.stopPropagation(); setRenameDraft(folder.name); setIsRenaming(true); }}
+              className="p-1 cursor-pointer bg-transparent border-none text-muted-foreground hover:text-foreground transition-colors"
+              title="Rename"
+            >
               <Pencil size={12} />
             </button>
             <button onClick={onDelete} className="p-1 cursor-pointer bg-transparent border-none text-destructive hover:text-destructive/80 transition-colors" title="Delete">
               <X size={12} />
             </button>
-            {pickerOpen && (
-              <div
-                ref={pickerRef}
-                className="absolute z-50 bottom-full right-0 mb-1 p-2 bg-popover border border-border rounded-lg shadow-lg"
-                style={{ minWidth: 130 }}
-              >
-                <div className="grid grid-cols-6 gap-1.5">
-                  {Object.entries(FOLDER_COLORS).map(([key, val]) => (
-                    <button
-                      key={key}
-                      title={key}
-                      onClick={() => {
-                        onColorChange(key === "default" ? undefined : key);
-                        setPickerOpen(false);
-                      }}
-                      className={cn(
-                        "w-4 h-4 rounded-full border transition-transform hover:scale-110",
-                        folder.color === key || (!folder.color && key === "default")
-                          ? "border-foreground/60 ring-1 ring-foreground/40"
-                          : "border-border/50",
-                      )}
-                      style={{
-                        background: val
-                          ? (isDark ? val.dark : val.light)
-                          : "transparent",
-                        ...(key === "default" ? { backgroundImage: "repeating-linear-gradient(45deg, #ccc 0, #ccc 1px, transparent 0, transparent 50%)", backgroundSize: "4px 4px" } : {}),
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -422,17 +518,15 @@ function DroppableFolder({
 type FolderTreeProps = {
   state: LibraryState;
   activeFolderId: string;
-  isDark: boolean;
   onSelectFolder: (id: string) => void;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
-  onColorChange: (id: string, color: string | undefined) => void;
-  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
+  onIconChange: (id: string, icon: string | undefined) => void;
   emptyFolderIds?: Set<string>;
   rootFolderCount?: number;
 };
 
-function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename, emptyFolderIds, rootFolderCount }: FolderTreeProps) {
+function FolderTree({ state, activeFolderId, onSelectFolder, onRenameFolder, onDeleteFolder, onIconChange, emptyFolderIds, rootFolderCount }: FolderTreeProps) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
     // Collapse everything except root (so main folders are visible, subfolders hidden)
     const all = new Set(Object.keys(state.folders));
@@ -471,14 +565,11 @@ function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFol
         isRoot={folderId === state.rootFolderId}
         hasChildren={hasChildren}
         isCollapsed={isCollapsed}
-        isDark={isDark}
         onSelect={() => onSelectFolder(folderId)}
         onToggleCollapse={() => toggleFolder(folderId)}
-        onRename={() => {
-          onRequestRename("Rename folder", folder.name, (name) => onRenameFolder(folderId, name));
-        }}
+        onRename={(name) => onRenameFolder(folderId, name)}
         onDelete={() => onDeleteFolder(folderId)}
-        onColorChange={(color) => onColorChange(folderId, color)}
+        onIconChange={(icon) => onIconChange(folderId, icon)}
         isEmptyHighlighted={emptyFolderIds?.has(folderId)}
         rootFolderCount={folderId === state.rootFolderId ? rootFolderCount : undefined}
       >
@@ -519,6 +610,9 @@ function SortableBookmarkItem({
   onToggleTags,
   onSaveReminder,
   onToggleFavorite,
+  isRenaming,
+  onRenameConfirm,
+  onRenameCancel,
 }: {
   bookmark: Bookmark;
   onOpen: () => void;
@@ -540,15 +634,35 @@ function SortableBookmarkItem({
   onToggleTags?: () => void;
   onSaveReminder?: (reminderAt: number | null) => void;
   onToggleFavorite?: () => void;
+  isRenaming?: boolean;
+  onRenameConfirm?: (name: string) => void;
+  onRenameCancel?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [closestEdge, setClosestEdge] = useState<Edge | null>(null);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderDateDraft, setReminderDateDraft] = useState("");
   const [reminderTimeDraft, setReminderTimeDraft] = useState("09:00");
+  const [renameDraft, setRenameDraft] = useState("");
+
+  useEffect(() => {
+    if (isRenaming) {
+      setRenameDraft(bookmark.name);
+    } else {
+      setRenameDraft("");
+    }
+  }, [isRenaming, bookmark.name]);
+
+  // Select all text after the draft value has been populated into the input
+  useEffect(() => {
+    if (isRenaming && renameDraft) {
+      renameInputRef.current?.select();
+    }
+  }, [isRenaming, renameDraft]);
 
   useEffect(() => {
     const el = ref.current;
@@ -593,7 +707,7 @@ function SortableBookmarkItem({
       onFocus={onFocusCard}
       data-bookmark-id={bookmark.id}
       className={cn(
-        "group/card relative rounded-lg border p-3 transition-all outline-none",
+        "group/card relative rounded-lg border p-3.5 transition-all outline-none",
         isSnippet ? "border-l-2 border-l-snippet" : "border-border/50",
         selected && "border-info ring-1 ring-info/30",
         !selected && !isSnippet && "hover:border-border hover:shadow-sm",
@@ -608,7 +722,7 @@ function SortableBookmarkItem({
         )} />
       )}
 
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-3">
         {bulkMode && (
           <input
             type="checkbox"
@@ -626,23 +740,52 @@ function SortableBookmarkItem({
         </span>
 
         <img
-          src={`https://www.google.com/s2/favicons?sz=16&domain=${bookmark.domain}`}
+          src={`https://www.google.com/s2/favicons?sz=20&domain=${bookmark.domain}`}
           alt=""
-          width={16}
-          height={16}
+          width={18}
+          height={18}
           className="shrink-0 mt-0.5 rounded-sm"
           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={onOpen}
-              className="font-semibold text-sm text-foreground hover:text-primary cursor-pointer bg-transparent border-none p-0 font-[inherit] truncate max-w-87.5 text-left transition-colors"
-              title={bookmark.name}
-            >
-              {bookmark.name}
-            </button>
+            {isRenaming ? (
+              <div className="flex flex-1 items-center gap-1 min-w-0">
+                <input
+                  ref={renameInputRef}
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && renameDraft.trim()) { onRenameConfirm?.(renameDraft.trim()); }
+                    if (e.key === "Escape") onRenameCancel?.();
+                  }}
+                  className="flex-1 min-w-0 bg-transparent border-b border-primary outline-none font-semibold text-[15px] text-foreground py-0.5 px-0"
+                />
+                <button
+                  onClick={() => { if (renameDraft.trim()) onRenameConfirm?.(renameDraft.trim()); }}
+                  className="shrink-0 p-0.5 rounded text-primary hover:text-primary/80 transition-colors"
+                  title="Confirm"
+                >
+                  <Check size={13} />
+                </button>
+                <button
+                  onClick={onRenameCancel}
+                  className="shrink-0 p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors"
+                  title="Cancel"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onOpen}
+                className="font-semibold text-[15px] text-foreground hover:text-primary cursor-pointer bg-transparent border-none p-0 font-[inherit] truncate max-w-87.5 text-left transition-colors"
+                title={bookmark.name}
+              >
+                {bookmark.name}
+              </button>
+            )}
             {isSnippet && (
               <Badge variant="outline" className="text-snippet border-snippet/30 bg-snippet/10 text-[10px] px-1.5 py-0">
                 snippet
@@ -673,7 +816,7 @@ function SortableBookmarkItem({
             )}
           </div>
 
-          <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+          <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
             <span>{bookmark.domain}</span>
             <span>{relativeTime(bookmark.createdAt)}</span>
             {(bookmark.openCount ?? 0) > 0 && (
@@ -686,19 +829,19 @@ function SortableBookmarkItem({
             )}
             {bookmark.reminderAt && (
               <span className="inline-flex items-center gap-0.5 text-amber-500">
-                <Bell size={10} />
+                <Bell size={12} />
                 {reminderLabel(bookmark.reminderAt)}
               </span>
             )}
           </div>
 
           {snippetPreview && (
-            <p className="text-xs text-muted-foreground mt-1.5 italic leading-relaxed truncate">
+            <p className="text-sm text-muted-foreground mt-1.5 italic leading-relaxed truncate">
               &ldquo;{snippetPreview}&rdquo;
             </p>
           )}
           {bookmark.notes && bookmark.notes.trim() && (
-            <p className="text-xs text-muted-foreground mt-1 italic truncate">
+            <p className="text-sm text-muted-foreground mt-1 italic truncate">
               {bookmark.notes.length > 60 ? bookmark.notes.slice(0, 60) + "…" : bookmark.notes}
             </p>
           )}
@@ -712,7 +855,7 @@ function SortableBookmarkItem({
                 return (
                   <span
                     key={tagId}
-                    className="inline-flex items-center text-[10px] px-1.5 py-0 rounded-full border font-normal"
+                    className="inline-flex items-center text-xs px-2 py-0.5 rounded-full border font-normal"
                     style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + "15" } : undefined}
                   >
                     #{tag.name}
@@ -868,7 +1011,7 @@ function RecentPins({ bookmarks, onOpen }: { bookmarks: Bookmark[]; onOpen: (b: 
 
   const recent = [...bookmarks]
     .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 10);
+    .slice(0, 5);
 
   if (recent.length === 0) return null;
 
@@ -884,34 +1027,29 @@ function RecentPins({ bookmarks, onOpen }: { bookmarks: Bookmark[]; onOpen: (b: 
         <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Recently Pinned</span>
       </button>
       {!collapsed && (
-        <ScrollArea className="w-full">
-          <div className="flex gap-2 py-1 pr-4">
-            {recent.map((b) => (
-              <Tooltip key={b.id}>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => onOpen(b)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted/50 border border-border/50 rounded-full cursor-pointer text-xs text-foreground whitespace-nowrap shrink-0 max-w-72 shadow-sm hover:shadow-md hover:border-border transition-all"
-                  >
-                    <img
-                      src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
-                      alt=""
-                      width={14}
-                      height={14}
-                      className="rounded-sm shrink-0"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
-                    <span className="overflow-hidden text-ellipsis">
-                      {truncate(b.name, 28)}
-                    </span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>{b.name}</TooltipContent>
-              </Tooltip>
-            ))}
-          </div>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
+        <div className="flex gap-2 py-1">
+          {recent.map((b) => (
+            <Tooltip key={b.id}>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onOpen(b)}
+                  className="flex flex-1 min-w-0 items-center gap-1.5 px-3 py-1.5 bg-muted/50 border border-border/50 rounded-full cursor-pointer text-xs text-foreground shadow-sm hover:shadow-md hover:border-border transition-all overflow-hidden"
+                >
+                  <img
+                    src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
+                    alt=""
+                    width={14}
+                    height={14}
+                    className="rounded-sm shrink-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  <span className="truncate min-w-0">{b.name}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{b.name}</TooltipContent>
+            </Tooltip>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1168,10 +1306,19 @@ function TagEditor({
         {ids.map((tagId) => {
           const tag = tagDefs[tagId];
           if (!tag) return null;
+          const chipColorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+          const chipColorHex = chipColorEntry ? (isDark ? chipColorEntry.dark : chipColorEntry.light) : null;
           return (
-            <span key={tagId} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+            <span
+              key={tagId}
+              className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border"
+              style={chipColorHex
+                ? { borderColor: chipColorHex + "60", color: chipColorHex, background: chipColorHex + "20" }
+                : { borderColor: "hsl(var(--primary) / 0.2)", color: "hsl(var(--primary))", background: "hsl(var(--primary) / 0.1)" }
+              }
+            >
               #{tag.name}
-              <button onClick={() => removeTag(tagId)} className="hover:text-destructive ml-0.5 leading-none">&times;</button>
+              <button onClick={() => removeTag(tagId)} className="ml-0.5 leading-none opacity-70 hover:opacity-100">&times;</button>
             </span>
           );
         })}
@@ -1300,20 +1447,20 @@ type BookmarkListProps = {
   bulkMode: boolean;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
-  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
   sortBy: SortKey;
   tagDefs: Record<string, TagDef>;
   onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
   isDark?: boolean;
   onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
   onToggleFavorite?: (id: string) => void;
-  searchScopedToFolder?: boolean;
+  searchFolderIds?: string[];
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchScopedToFolder }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [] }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!focusedId) return;
@@ -1321,12 +1468,24 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       ?.focus({ preventScroll: false });
   }, [focusedId]);
 
-  const activeIds = (isSearching && !searchScopedToFolder)
-    ? null
-    : getDescendantFolderIds(activeFolderId, folders);
+  // Compute the set of folder IDs that should be visible:
+  // - specific folders selected → those folders + descendants
+  // - searching with no scope → all folders (null = no filter)
+  // - not searching → current folder + descendants only
+  const activeIds: Set<string> | null = useMemo(() => {
+    if (searchFolderIds.length > 0) {
+      const ids = new Set<string>();
+      for (const fid of searchFolderIds) {
+        for (const id of getDescendantFolderIds(fid, folders)) ids.add(id);
+      }
+      return ids;
+    }
+    if (isSearching) return null;
+    return getDescendantFolderIds(activeFolderId, folders);
+  }, [searchFolderIds, isSearching, activeFolderId, folders]);
 
   const filtered = sortBookmarks(
-    bookmarks.filter((b) => (isSearching && !searchScopedToFolder) || activeIds!.has(b.folderId)),
+    bookmarks.filter((b) => activeIds === null || activeIds.has(b.folderId)),
     sortBy,
   );
 
@@ -1348,8 +1507,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       onDeleteBookmark(focusedId);
     }
     if ((e.key === "e" || e.key === "E") && focusedId) {
-      const b = filtered.find((x) => x.id === focusedId);
-      if (b) onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(focusedId, name));
+      setRenamingId(focusedId);
     }
     if (e.key === "Escape") {
       setFocusedId(null);
@@ -1394,9 +1552,10 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       <SortableBookmarkItem
         bookmark={b}
         onOpen={() => handleOpenBookmark(b)}
-        onRename={() => {
-          onRequestRename("Rename bookmark", b.name, (name) => onRenameBookmark(b.id, name));
-        }}
+        onRename={() => setRenamingId(b.id)}
+        isRenaming={renamingId === b.id}
+        onRenameConfirm={(name) => { onRenameBookmark(b.id, name); setRenamingId(null); }}
+        onRenameCancel={() => setRenamingId(null)}
         onDelete={() => onDeleteBookmark(b.id)}
         folderName={folderName}
         bulkMode={bulkMode}
@@ -1567,7 +1726,7 @@ function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: 
 
 /* ─── BulkActionsBar ───────────────────────────────────────────── */
 
-function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, onMove, onBulkReminder }: {
+function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, onMove, onBulkReminder, onBulkAddTags, onBulkRemoveTags, tagDefs }: {
   count: number;
   folders: Record<string, import("../../core/types").Folder>;
   onSelectAll: () => void;
@@ -1575,8 +1734,18 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
   onDelete: () => void;
   onMove: (targetFolderId: string) => void;
   onBulkReminder?: (days: number) => void;
+  onBulkAddTags?: (tagIds: string[]) => void;
+  onBulkRemoveTags?: (tagIds: string[]) => void;
+  tagDefs?: Record<string, TagDef>;
 }) {
+  const { isDark } = useTheme();
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [tagMode, setTagMode] = useState<"add" | "remove">("add");
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+
+  const tagList = Object.values(tagDefs ?? {});
+  const hasTagOps = (onBulkAddTags || onBulkRemoveTags) && tagList.length > 0;
 
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-card border border-border rounded-xl px-4 py-2.5 flex items-center gap-3 shadow-lg z-100 text-sm">
@@ -1610,6 +1779,64 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
           </div>
         )}
       </div>
+      {hasTagOps && (
+        <Popover open={tagPickerOpen} onOpenChange={(o) => { setTagPickerOpen(o); if (!o) setSelectedTagIds([]); }}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-1.5">
+              <Tag size={13} />
+              Tags
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-64 p-3" align="center" side="top">
+            {/* Add / Remove toggle */}
+            <div className="flex gap-1 mb-3 rounded-lg border border-border p-0.5 bg-muted">
+              <button
+                onClick={() => setTagMode("add")}
+                className={cn("flex-1 text-xs py-1 rounded-md transition-colors", tagMode === "add" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Add tags
+              </button>
+              <button
+                onClick={() => setTagMode("remove")}
+                className={cn("flex-1 text-xs py-1 rounded-md transition-colors", tagMode === "remove" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Remove tags
+              </button>
+            </div>
+            {/* Tag chips */}
+            <div className="flex flex-wrap gap-1.5 mb-3 max-h-32 overflow-y-auto">
+              {tagList.map((tag) => {
+                const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+                const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+                const active = selectedTagIds.includes(tag.id);
+                return (
+                  <button
+                    key={tag.id}
+                    onClick={() => setSelectedTagIds((prev) => active ? prev.filter((id) => id !== tag.id) : [...prev, tag.id])}
+                    className={cn("inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors", active ? "ring-1 ring-primary" : "opacity-70 hover:opacity-100")}
+                    style={colorHex ? { borderColor: colorHex + "60", color: colorHex, background: colorHex + (active ? "30" : "15") } : undefined}
+                  >
+                    #{tag.name}
+                  </button>
+                );
+              })}
+            </div>
+            <Button
+              size="sm"
+              className="w-full"
+              disabled={selectedTagIds.length === 0}
+              onClick={() => {
+                if (tagMode === "add") onBulkAddTags?.(selectedTagIds);
+                else onBulkRemoveTags?.(selectedTagIds);
+                setTagPickerOpen(false);
+                setSelectedTagIds([]);
+              }}
+            >
+              {tagMode === "add" ? "Add to selected" : "Remove from selected"}
+            </Button>
+          </PopoverContent>
+        </Popover>
+      )}
       {onBulkReminder && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1637,39 +1864,6 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 
 /* ─── Library (main component) ──────────────────────────────────── */
 
-function RenameDialogBody({
-  initialValue,
-  onCommit,
-  onCancel,
-}: {
-  initialValue: string;
-  onCommit: (val: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initialValue);
-  const trimmed = value.trim();
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.select(); }, []);
-  return (
-    <>
-      <Input
-        ref={inputRef}
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && trimmed) { e.preventDefault(); onCommit(trimmed); }
-          if (e.key === "Escape") { e.preventDefault(); onCancel(); }
-        }}
-      />
-      <div className="flex justify-end gap-2 mt-2">
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={() => { if (trimmed) onCommit(trimmed); }} disabled={!trimmed}>OK</Button>
-      </div>
-    </>
-  );
-}
-
 // ── SourceFilter type ─────────────────────────────────────────────────────────
 
 type SourceFilter = "all" | "web" | "ai_answer" | "ai_prompt";
@@ -1677,8 +1871,6 @@ type SourceFilter = "all" | "web" | "ai_answer" | "ai_prompt";
 // ── FilterBar ─────────────────────────────────────────────────────────────────
 
 type FilterBarProps = {
-  searchWithinFolder: boolean;
-  onToggleSearchScope: () => void;
   sourceFilter: SourceFilter;
   onSourceFilterChange: (v: SourceFilter) => void;
   dateFrom: string;
@@ -1690,30 +1882,12 @@ type FilterBarProps = {
 };
 
 function FilterBar({
-  searchWithinFolder, onToggleSearchScope,
   sourceFilter, onSourceFilterChange,
   dateFrom, dateTo, onDateFromChange, onDateToChange,
   sortBy, onSortChange,
 }: FilterBarProps) {
   return (
     <div className="flex gap-2 items-center">
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={onToggleSearchScope}
-        className={cn(
-          "h-9 shrink-0 gap-1.5",
-          searchWithinFolder
-            ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
-            : "w-9 px-0 text-muted-foreground hover:text-foreground"
-        )}
-        title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
-      >
-        <FolderSearch size={16} />
-        {searchWithinFolder && (
-          <span className="text-xs font-medium">Current folder</span>
-        )}
-      </Button>
       <Select value={sourceFilter} onValueChange={(v) => onSourceFilterChange(v as SourceFilter)}>
         <SelectTrigger className="w-auto h-9 text-xs shrink-0">
           <SelectValue />
@@ -1803,8 +1977,9 @@ type FolderSidebarPanelProps = {
   isDark: boolean;
   tagsExpanded: boolean;
   onToggleTags: () => void;
-  activeTagFilter: string | null;
-  onTagFilterChange: (id: string | null) => void;
+  activeTagFilters: string[];
+  availableTagIds: Set<string>;
+  onTagFilterChange: (id: string) => void;
   allBookmarks: Bookmark[];
   sortedTagDefs: TagDef[];
   emptyFolderIds: Set<string>;
@@ -1814,15 +1989,14 @@ type FolderSidebarPanelProps = {
   onSelectFolder: (id: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => void;
-  onColorChange: (id: string, color: string | undefined) => Promise<void>;
-  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
+  onIconChange: (id: string, icon: string | undefined) => Promise<void>;
 };
 
 function FolderSidebarPanel({
   state, activeFolderId, isDark, tagsExpanded, onToggleTags,
-  activeTagFilter, onTagFilterChange, allBookmarks, sortedTagDefs,
+  activeTagFilters, availableTagIds, onTagFilterChange, allBookmarks, sortedTagDefs,
   emptyFolderIds, rootFolderCount, onDeleteTag, onCreateFolder,
-  onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename,
+  onSelectFolder, onRenameFolder, onDeleteFolder, onIconChange,
 }: FolderSidebarPanelProps) {
   return (
     <>
@@ -1843,12 +2017,10 @@ function FolderSidebarPanel({
       <FolderTree
         state={state}
         activeFolderId={activeFolderId}
-        isDark={isDark}
         onSelectFolder={onSelectFolder}
         onRenameFolder={onRenameFolder}
         onDeleteFolder={onDeleteFolder}
-        onColorChange={onColorChange}
-        onRequestRename={onRequestRename}
+        onIconChange={onIconChange}
         emptyFolderIds={emptyFolderIds}
         rootFolderCount={rootFolderCount}
       />
@@ -1863,17 +2035,22 @@ function FolderSidebarPanel({
         {tagsExpanded && (
           <div className="space-y-0.5">
             {sortedTagDefs.map((tag) => {
+              const isActive = activeTagFilters.includes(tag.id);
+              // Always hide tags not in the visible result set, unless the tag is active
+              // (so user can click it to deactivate). When no filters/search are applied
+              // availableTagIds contains every tag, so nothing is hidden.
+              if (!isActive && !availableTagIds.has(tag.id)) return null;
               const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
               const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
               const count = allBookmarks.filter((b) => (b.tags ?? []).includes(tag.id)).length;
               return (
                 <div key={tag.id} className="group/tag relative flex items-center">
                   <button
-                    onClick={() => onTagFilterChange(activeTagFilter === tag.id ? null : tag.id)}
+                    onClick={() => onTagFilterChange(tag.id)}
                     className={cn(
                       "flex items-center gap-1.5 flex-1 rounded px-1.5 py-1 text-sm text-left transition-colors pr-6",
                       count === 0 ? "opacity-50" : "",
-                      activeTagFilter === tag.id
+                      isActive
                         ? "bg-primary/10 text-primary"
                         : "hover:bg-accent/50 text-foreground",
                     )}
@@ -1883,7 +2060,7 @@ function FolderSidebarPanel({
                       style={{ background: colorHex ?? "transparent" }}
                     />
                     <span className="truncate flex-1">#{tag.name}</span>
-                    <span className="text-[10px] text-muted-foreground">{count}</span>
+                    <span className="text-xs text-muted-foreground">{count}</span>
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); onDeleteTag(tag.id); }}
@@ -1926,21 +2103,16 @@ export default function Library() {
   } = useLibraryState();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchWithinFolder, setSearchWithinFolder] = useState(false);
+  const [searchFolderIds, setSearchFolderIds] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const [renameDialog, setRenameDialog] = useState<{
-    title: string;
-    currentName: string;
-    onConfirm: (name: string) => void;
-  } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(276);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [tagsExpanded, setTagsExpanded] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingDivider = useRef(false);
@@ -1982,7 +2154,7 @@ export default function Library() {
     sourceFilter,
     dateFrom,
     dateTo,
-    activeTagFilter,
+    activeTagFilters,
     dashboardFilter,
   });
 
@@ -2012,7 +2184,7 @@ export default function Library() {
 
   // Global ? shortcut — must be before early return; references hook objects directly
   useEffect(() => {
-    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen
+    const anyDialogOpen = !!confirmDialog || settingsOpen || shortcutsOpen
       || folderOps.isFolderModalOpen || !!bookmarkOps.browserImportPreview;
     function onKey(e: KeyboardEvent) {
       if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
@@ -2021,7 +2193,7 @@ export default function Library() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, folderOps.isFolderModalOpen, bookmarkOps.browserImportPreview]);
+  }, [confirmDialog, settingsOpen, shortcutsOpen, folderOps.isFolderModalOpen, bookmarkOps.browserImportPreview]);
 
   // ── Early return after all hooks ────────────────────────────────────────────
   if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
@@ -2040,6 +2212,7 @@ export default function Library() {
     sortedTagDefs,
     rootFolderCount,
     isSearching,
+    availableTagIds,
   } = pipeline;
 
   const {
@@ -2052,7 +2225,7 @@ export default function Library() {
     handleSelectFolder,
     handleRenameFolder,
     handleDeleteFolder,
-    handleSetFolderColor,
+    handleSetFolderIcon,
   } = folderOps;
 
   const {
@@ -2086,6 +2259,8 @@ export default function Library() {
     handleExport,
     handleImport,
     handleToggleFavorite,
+    handleBulkAddTags,
+    handleBulkRemoveTags,
   } = bookmarkOps;
 
   /* ─── Handlers ─────────────────────────────────────────────── */
@@ -2093,7 +2268,7 @@ export default function Library() {
   const handleDeleteTag = async (tagId: string) => {
     try {
       await deleteTag(tagId);
-      if (activeTagFilter === tagId) setActiveTagFilter(null);
+      setActiveTagFilters((prev) => prev.filter((t) => t !== tagId));
       await refreshState();
     } catch (err) {
       console.error("Failed to delete tag", err);
@@ -2128,13 +2303,92 @@ export default function Library() {
                   <TooltipContent>How to use</TooltipContent>
                 </Tooltip>
               </div>
-              <Input
-                type="text"
-                placeholder="Search bookmarks\u2026"
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); if (e.target.value.trim()) setDashboardFilter(null); }}
-                className="flex-1 h-9"
-              />
+              <div className="relative flex-1">
+                <Input
+                  type="text"
+                  placeholder="Search bookmarks\u2026"
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); if (e.target.value.trim()) setDashboardFilter(null); }}
+                  className={cn("h-9 w-full", searchQuery && "pr-8")}
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {/* Folder scope selector */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      "h-9 w-9 shrink-0",
+                      searchFolderIds.length > 0
+                        ? "text-primary bg-primary/10 hover:bg-primary/20"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title={searchFolderIds.length > 0 ? `Searching in ${searchFolderIds.length} folder${searchFolderIds.length !== 1 ? "s" : ""}` : "Search scope: all folders"}
+                  >
+                    <FolderSearch size={16} />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-2" align="end">
+                  <div className="text-xs font-medium text-muted-foreground px-1 mb-1.5">Search in folders</div>
+                  <button
+                    onClick={() => setSearchFolderIds([])}
+                    className={cn(
+                      "flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors",
+                      searchFolderIds.length === 0
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "hover:bg-muted text-foreground"
+                    )}
+                  >
+                    <FolderIcon size={13} />
+                    {state.folders[state.rootFolderId]?.name ?? "ZeroPin"}
+                  </button>
+                  <div className="my-1 border-t border-border" />
+                  {(() => {
+                    const renderTree = (parentId: string, depth: number): React.ReactNode[] => {
+                      const children = Object.values(state.folders)
+                        .filter((f) => f.parentId === parentId)
+                        .sort((a, b) => a.name.localeCompare(b.name));
+                      return children.flatMap((folder) => {
+                        const isSelected = searchFolderIds.includes(folder.id);
+                        return [
+                          <button
+                            key={folder.id}
+                            onClick={() =>
+                              setSearchFolderIds((prev) =>
+                                isSelected ? prev.filter((id) => id !== folder.id) : [...prev, folder.id]
+                              )
+                            }
+                            style={{ paddingLeft: `${8 + depth * 5}px` }}
+                            className={cn(
+                              "flex items-center gap-2 w-full pr-2 py-1.5 rounded text-sm transition-colors",
+                              isSelected
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "hover:bg-muted text-foreground"
+                            )}
+                          >
+                            <div className={cn("w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 text-[9px]", isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border")}>
+                              {isSelected && "✓"}
+                            </div>
+                            <span className="truncate">{folder.name}</span>
+                          </button>,
+                          ...renderTree(folder.id, depth + 1),
+                        ];
+                      });
+                    };
+                    return renderTree(state.rootFolderId, 0);
+                  })()}
+                </PopoverContent>
+              </Popover>
               <div className="text-right shrink-0">
                 <div className="text-xs text-muted-foreground">Folder</div>
                 <div className="text-sm font-semibold text-foreground">
@@ -2165,8 +2419,6 @@ export default function Library() {
             {/* Row 3: filter controls + action buttons */}
             <div className="mt-2 flex items-center gap-2">
               <FilterBar
-                searchWithinFolder={searchWithinFolder}
-                onToggleSearchScope={() => setSearchWithinFolder((v) => !v)}
                 sourceFilter={sourceFilter}
                 onSourceFilterChange={setSourceFilter}
                 dateFrom={dateFrom}
@@ -2240,8 +2492,13 @@ export default function Library() {
                 isDark={isDark}
                 tagsExpanded={tagsExpanded}
                 onToggleTags={() => setTagsExpanded((v) => !v)}
-                activeTagFilter={activeTagFilter}
-                onTagFilterChange={setActiveTagFilter}
+                activeTagFilters={activeTagFilters}
+                availableTagIds={availableTagIds}
+                onTagFilterChange={(id) =>
+                  setActiveTagFilters((prev) =>
+                    prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+                  )
+                }
                 allBookmarks={allBookmarks}
                 sortedTagDefs={sortedTagDefs}
                 emptyFolderIds={emptyFolderIds}
@@ -2251,10 +2508,7 @@ export default function Library() {
                 onSelectFolder={handleSelectFolder}
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
-                onColorChange={handleSetFolderColor}
-                onRequestRename={(title, currentName, onCommit) =>
-                  setRenameDialog({ title, currentName, onConfirm: onCommit })
-                }
+                onIconChange={handleSetFolderIcon}
               />
             </div>
             {/* Drag divider */}
@@ -2287,13 +2541,30 @@ export default function Library() {
                   </span>
                 </div>
               )}
-              {activeTagFilter && state.tagDefs?.[activeTagFilter] && (
-                <div className="flex items-center gap-2 mb-2 px-1">
-                  <span className="text-xs text-muted-foreground">Filtered by tag:</span>
-                  <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
-                    #{state.tagDefs[activeTagFilter].name}
-                    <button onClick={() => setActiveTagFilter(null)} className="ml-0.5 hover:text-primary/70">&times;</button>
-                  </span>
+              {activeTagFilters.length > 0 && (
+                <div className="flex items-center gap-1.5 mb-2 px-1 flex-wrap">
+                  <span className="text-xs text-muted-foreground shrink-0">Filtered by:</span>
+                  {activeTagFilters.map((tagId) => {
+                    const tag = state.tagDefs?.[tagId];
+                    if (!tag) return null;
+                    return (
+                      <span key={tagId} className="flex items-center gap-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
+                        #{tag.name}
+                        <button
+                          onClick={() => setActiveTagFilters((prev) => prev.filter((t) => t !== tagId))}
+                          className="ml-0.5 hover:text-primary/70"
+                        >&times;</button>
+                      </span>
+                    );
+                  })}
+                  {activeTagFilters.length > 1 && (
+                    <button
+                      onClick={() => setActiveTagFilters([])}
+                      className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  )}
                 </div>
               )}
               <BookmarkList
@@ -2316,16 +2587,13 @@ export default function Library() {
                     return next;
                   });
                 }}
-                onRequestRename={(title, currentName, onCommit) =>
-                  setRenameDialog({ title, currentName, onConfirm: onCommit })
-                }
                 sortBy={sortBy}
                 tagDefs={state.tagDefs ?? {}}
                 onSetBookmarkTags={handleSetBookmarkTags}
                 isDark={isDark}
                 onSaveReminder={handleSaveReminderDirect}
                 onToggleFavorite={handleToggleFavorite}
-                searchScopedToFolder={searchWithinFolder}
+                searchFolderIds={searchFolderIds}
               />
             </div>
           </div>
@@ -2368,6 +2636,9 @@ export default function Library() {
               }
             }}
             onBulkReminder={handleBulkSetReminder}
+            onBulkAddTags={handleBulkAddTags}
+            onBulkRemoveTags={handleBulkRemoveTags}
+            tagDefs={state.tagDefs ?? {}}
           />
         )}
 
@@ -2396,24 +2667,6 @@ export default function Library() {
             </div>
           </DialogContent>
         </Dialog>
-
-        {/* Rename dialog — replaces window.prompt() */}
-        {renameDialog && (
-          <Dialog open onOpenChange={(open) => { if (!open) setRenameDialog(null); }}>
-            <DialogContent className="sm:max-w-sm">
-              <DialogHeader>
-                <DialogTitle>{renameDialog.title}</DialogTitle>
-                <DialogDescription className="sr-only">Rename this item</DialogDescription>
-              </DialogHeader>
-              <RenameDialogBody
-                key={renameDialog.currentName}
-                initialValue={renameDialog.currentName}
-                onCommit={(val) => { renameDialog.onConfirm(val); setRenameDialog(null); }}
-                onCancel={() => setRenameDialog(null)}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
 
         {/* Generic confirm dialog — replaces window.confirm() */}
         <Dialog open={!!confirmDialog} onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}>

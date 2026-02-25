@@ -25,7 +25,7 @@ export interface FilterInputs {
   sourceFilter: "all" | "web" | "ai_answer" | "ai_prompt";
   dateFrom: string;
   dateTo: string;
-  activeTagFilter: string | null;
+  activeTagFilters: string[];
   dashboardFilter: DashboardFilter | null;
 }
 
@@ -42,6 +42,8 @@ export interface FilterPipelineResult {
   sortedTagDefs: TagDef[];
   rootFolderCount: number;
   isSearching: boolean;
+  /** Tag IDs that appear on ≥1 bookmark in the current tag-filtered set. */
+  availableTagIds: Set<string>;
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ export function useFilterPipeline(
   prefs: Prefs,
   inputs: FilterInputs,
 ): FilterPipelineResult {
-  const { searchQuery, sourceFilter, dateFrom, dateTo, activeTagFilter, dashboardFilter } = inputs;
+  const { searchQuery, sourceFilter, dateFrom, dateTo, activeTagFilters, dashboardFilter } = inputs;
 
   const allBookmarks = useMemo(
     () => Object.values(state.bookmarks),
@@ -163,14 +165,15 @@ export function useFilterPipeline(
     [sourceFiltered, dateFrom, dateTo],
   );
 
+  // Intersection: bookmark must have ALL active tag filters
   const tagFiltered = useMemo(
     () =>
-      activeTagFilter
+      activeTagFilters.length > 0
         ? dateFiltered.filter((b) =>
-            (b.tags ?? []).includes(activeTagFilter),
+            activeTagFilters.every((t) => (b.tags ?? []).includes(t)),
           )
         : dateFiltered,
-    [dateFiltered, activeTagFilter],
+    [dateFiltered, activeTagFilters],
   );
 
   const isSearching = searchQuery.trim().length > 0;
@@ -213,9 +216,16 @@ export function useFilterPipeline(
 
   const filtered = useMemo(() => {
     if (dashboardBase === null) return searchFiltered;
-    if (!isSearching) return dashboardBase;
+    // Dashboard base is also intersected with any active tag filters
+    const tagIntersected =
+      activeTagFilters.length > 0
+        ? dashboardBase.filter((b) =>
+            activeTagFilters.every((t) => (b.tags ?? []).includes(t)),
+          )
+        : dashboardBase;
+    if (!isSearching) return tagIntersected;
     const q = searchQuery.toLowerCase();
-    return dashboardBase.filter(
+    return tagIntersected.filter(
       (b) =>
         b.name.toLowerCase().includes(q) ||
         b.url.toLowerCase().includes(q) ||
@@ -224,7 +234,14 @@ export function useFilterPipeline(
         (b.notes ?? "").toLowerCase().includes(q),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dashboardBase, searchFiltered, isSearching, searchQuery]);
+  }, [dashboardBase, searchFiltered, activeTagFilters, isSearching, searchQuery]);
+
+  // Tags that appear on ≥1 bookmark in the final visible set — drives sidebar narrowing.
+  // Derived from `filtered` so search, dashboard, and tag filters all contribute.
+  const availableTagIds = useMemo(
+    () => new Set(filtered.flatMap((b) => b.tags ?? [])),
+    [filtered],
+  );
 
   return {
     allBookmarks,
@@ -239,5 +256,6 @@ export function useFilterPipeline(
     sortedTagDefs,
     rootFolderCount,
     isSearching,
+    availableTagIds,
   };
 }

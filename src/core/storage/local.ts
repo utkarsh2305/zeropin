@@ -275,6 +275,17 @@ export async function setFolderColor(folderId: string, color: string | undefined
   await setState(state);
 }
 
+export async function setFolderIcon(folderId: string, icon: string | undefined): Promise<void> {
+  const state = await getState();
+  const folder = state.folders[folderId];
+  if (!folder) throw new Error(`Folder ${folderId} not found`);
+
+  folder.icon = icon || undefined;
+  folder.updatedAt = now();
+
+  await setState(state);
+}
+
 export async function deleteFolderIfEmpty(folderId: string): Promise<void> {
   const state = await getState();
   if (!state.folders[folderId]) throw new Error(`Folder ${folderId} not found`);

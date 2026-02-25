@@ -4,6 +4,7 @@ import {
   renameFolder,
   deleteFolderCascade,
   setFolderColor,
+  setFolderIcon,
   setLastUsedFolder,
 } from "../../core/storage/local";
 import type { LibraryState, Folder, Bookmark } from "../../core/types";
@@ -74,6 +75,7 @@ export interface FolderOpsResult {
   handleRenameFolder: (id: string, name: string) => Promise<void>;
   handleDeleteFolder: (id: string) => void;
   handleSetFolderColor: (id: string, color: string | undefined) => Promise<void>;
+  handleSetFolderIcon: (id: string, icon: string | undefined) => Promise<void>;
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -178,6 +180,18 @@ export function useFolderOps(deps: FolderOpsDeps): FolderOpsResult {
     }
   };
 
+  const handleSetFolderIcon = async (
+    id: string,
+    icon: string | undefined,
+  ) => {
+    try {
+      await setFolderIcon(id, icon);
+      await refreshState();
+    } catch (err) {
+      console.error("Failed to set folder icon", err);
+    }
+  };
+
   return {
     isFolderModalOpen,
     setFolderModalOpen,
@@ -189,5 +203,6 @@ export function useFolderOps(deps: FolderOpsDeps): FolderOpsResult {
     handleRenameFolder,
     handleDeleteFolder,
     handleSetFolderColor,
+    handleSetFolderIcon,
   };
 }

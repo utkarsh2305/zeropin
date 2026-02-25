@@ -8,10 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search } from "lucide-react";
+import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell } from "lucide-react";
 import { BrandIcon } from "./app/BrandIcon";
 import type { Bookmark, LibraryState } from "./core/types";
 import "./app.css";
+
+function isDue(b: Bookmark): boolean {
+  if (!b.reminderAt) return false;
+  if (b.reminderAt > Date.now()) return false;
+  if (b.reminderSnoozedUntil && b.reminderSnoozedUntil > Date.now()) return false;
+  return true;
+}
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -65,6 +72,10 @@ function Popup() {
     : [];
   const recentPins = [...allBookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const displayList = isSearching ? searchResults : recentPins;
+
+  const allDue = allBookmarks.filter(isDue).sort((a, b) => (a.reminderAt ?? 0) - (b.reminderAt ?? 0));
+  const dueToShow = allDue.slice(0, 3);
+  const hasMoreDue = allDue.length > 3;
 
   // Current folder
   const currentFolder = state
@@ -205,6 +216,53 @@ function Popup() {
               <ExternalLink size={12} />
             </button>
           </div>
+
+          {/* Due Reminders — only shown when there are due reminders */}
+          {allDue.length > 0 && (
+            <div className="px-3 py-2 border-b border-border">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-amber-500">
+                  <Bell size={10} />
+                  <span>Due Reminders</span>
+                </div>
+                {hasMoreDue && (
+                  <button
+                    onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL("library.html") })}
+                    className="text-[10px] text-amber-500 hover:text-amber-400 transition-colors"
+                  >
+                    {allDue.length - 3} more in Library →
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-col gap-0.5">
+                {dueToShow.map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => openPin(b)}
+                    className="flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-amber-500/10 transition-colors w-full"
+                  >
+                    <img
+                      src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
+                      alt=""
+                      className="w-4 h-4 shrink-0 rounded-sm mt-0.5"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm truncate">{b.name}</span>
+                        {b.type === "SNIPPET" && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-auto border-snippet text-snippet shrink-0">
+                            snippet
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate">{b.domain}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Pin list */}
           <div className="px-3 py-2">

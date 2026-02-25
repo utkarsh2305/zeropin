@@ -1907,6 +1907,19 @@ export default function Library() {
     setDashboardFilter,
   });
 
+  // Global ? shortcut — must be before early return; references hook objects directly
+  useEffect(() => {
+    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen
+      || folderOps.isFolderModalOpen || !!bookmarkOps.browserImportPreview;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+        setShortcutsOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, folderOps.isFolderModalOpen, bookmarkOps.browserImportPreview]);
+
   // ── Early return after all hooks ────────────────────────────────────────────
   if (!state) return <div className="p-4 text-foreground">Loading\u2026</div>;
 
@@ -1968,18 +1981,6 @@ export default function Library() {
     handleExport,
     handleImport,
   } = bookmarkOps;
-
-  // Global ? shortcut for shortcuts cheat-sheet (after hooks so isFolderModalOpen / browserImportPreview are in scope)
-  useEffect(() => {
-    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen || isFolderModalOpen || !!browserImportPreview;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
-        setShortcutsOpen(true);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, isFolderModalOpen, browserImportPreview]);
 
   /* ─── Handlers ─────────────────────────────────────────────── */
 

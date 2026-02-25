@@ -1584,6 +1584,227 @@ function RenameDialogBody({
   );
 }
 
+// ── SourceFilter type ─────────────────────────────────────────────────────────
+
+type SourceFilter = "all" | "web" | "ai_answer" | "ai_prompt";
+
+// ── FilterBar ─────────────────────────────────────────────────────────────────
+
+type FilterBarProps = {
+  searchWithinFolder: boolean;
+  onToggleSearchScope: () => void;
+  sourceFilter: SourceFilter;
+  onSourceFilterChange: (v: SourceFilter) => void;
+  dateFrom: string;
+  dateTo: string;
+  onDateFromChange: (v: string) => void;
+  onDateToChange: (v: string) => void;
+  sortBy: SortKey;
+  onSortChange: (v: SortKey) => void;
+};
+
+function FilterBar({
+  searchWithinFolder, onToggleSearchScope,
+  sourceFilter, onSourceFilterChange,
+  dateFrom, dateTo, onDateFromChange, onDateToChange,
+  sortBy, onSortChange,
+}: FilterBarProps) {
+  return (
+    <div className="flex gap-2 items-center">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onToggleSearchScope}
+        className={cn(
+          "h-9 shrink-0 gap-1.5",
+          searchWithinFolder
+            ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
+            : "w-9 px-0 text-muted-foreground hover:text-foreground"
+        )}
+        title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
+      >
+        <FolderSearch size={16} />
+        {searchWithinFolder && (
+          <span className="text-xs font-medium">Current folder</span>
+        )}
+      </Button>
+      <Select value={sourceFilter} onValueChange={(v) => onSourceFilterChange(v as SourceFilter)}>
+        <SelectTrigger className="w-auto h-9 text-xs shrink-0">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All</SelectItem>
+          <SelectItem value="web">Web</SelectItem>
+          <SelectItem value="ai_answer">AI Answers</SelectItem>
+          <SelectItem value="ai_prompt">AI Prompts</SelectItem>
+        </SelectContent>
+      </Select>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-9 shrink-0 gap-1.5 px-2",
+              (dateFrom || dateTo)
+                ? "text-primary bg-primary/10 hover:bg-primary/20"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            title="Filter by date added"
+          >
+            <CalendarDays size={15} />
+            {(dateFrom || dateTo) && (
+              <span className="text-xs font-medium">
+                {dateFrom || "…"} → {dateTo || "…"}
+              </span>
+            )}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-64 p-3 space-y-3" align="start">
+          <p className="text-xs font-medium text-foreground">Date added</p>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground block">From</label>
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => onDateFromChange(e.target.value)}
+              className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground block">To</label>
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => onDateToChange(e.target.value)}
+              className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+            />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={() => { onDateFromChange(""); onDateToChange(""); }}
+            >
+              Clear
+            </button>
+          )}
+        </PopoverContent>
+      </Popover>
+      <Select value={sortBy} onValueChange={(v) => onSortChange(v as SortKey)}>
+        <SelectTrigger className="w-auto h-9 text-xs shrink-0">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="newest">Newest</SelectItem>
+          <SelectItem value="oldest">Oldest</SelectItem>
+          <SelectItem value="name_asc">Name A→Z</SelectItem>
+          <SelectItem value="name_desc">Name Z→A</SelectItem>
+          <SelectItem value="last_opened">Last Opened</SelectItem>
+          <SelectItem value="most_opened">Most Opened</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+// ── FolderSidebarPanel ────────────────────────────────────────────────────────
+
+type FolderSidebarPanelProps = {
+  state: LibraryState;
+  activeFolderId: string;
+  isDark: boolean;
+  tagsExpanded: boolean;
+  onToggleTags: () => void;
+  activeTagFilter: string | null;
+  onTagFilterChange: (id: string | null) => void;
+  allBookmarks: Bookmark[];
+  sortedTagDefs: TagDef[];
+  emptyFolderIds: Set<string>;
+  rootFolderCount: number;
+  onDeleteTag: (id: string) => void;
+  onSelectFolder: (id: string) => Promise<void>;
+  onRenameFolder: (id: string, name: string) => Promise<void>;
+  onDeleteFolder: (id: string) => void;
+  onColorChange: (id: string, color: string | undefined) => Promise<void>;
+  onRequestRename: (title: string, currentName: string, onCommit: (name: string) => void) => void;
+};
+
+function FolderSidebarPanel({
+  state, activeFolderId, isDark, tagsExpanded, onToggleTags,
+  activeTagFilter, onTagFilterChange, allBookmarks, sortedTagDefs,
+  emptyFolderIds, rootFolderCount, onDeleteTag,
+  onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename,
+}: FolderSidebarPanelProps) {
+  return (
+    <>
+      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2.5">Folders</div>
+      <FolderTree
+        state={state}
+        activeFolderId={activeFolderId}
+        isDark={isDark}
+        onSelectFolder={onSelectFolder}
+        onRenameFolder={onRenameFolder}
+        onDeleteFolder={onDeleteFolder}
+        onColorChange={onColorChange}
+        onRequestRename={onRequestRename}
+        emptyFolderIds={emptyFolderIds}
+        rootFolderCount={rootFolderCount}
+      />
+      <div className="mt-4 pt-4 border-t border-border px-2">
+        <button
+          onClick={onToggleTags}
+          className="flex items-center gap-1.5 w-full text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 hover:text-foreground transition-colors"
+        >
+          {tagsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          Tags
+        </button>
+        {tagsExpanded && (
+          <div className="space-y-0.5">
+            {sortedTagDefs.map((tag) => {
+              const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
+              const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
+              const count = allBookmarks.filter((b) => (b.tags ?? []).includes(tag.id)).length;
+              return (
+                <div key={tag.id} className="group/tag relative flex items-center">
+                  <button
+                    onClick={() => onTagFilterChange(activeTagFilter === tag.id ? null : tag.id)}
+                    className={cn(
+                      "flex items-center gap-1.5 flex-1 rounded px-1.5 py-1 text-sm text-left transition-colors pr-6",
+                      count === 0 ? "opacity-50" : "",
+                      activeTagFilter === tag.id
+                        ? "bg-primary/10 text-primary"
+                        : "hover:bg-accent/50 text-foreground",
+                    )}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0 border border-border/50"
+                      style={{ background: colorHex ?? "transparent" }}
+                    />
+                    <span className="truncate flex-1">#{tag.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{count}</span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onDeleteTag(tag.id); }}
+                    className="absolute right-1 opacity-0 group-hover/tag:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
+                    title="Delete tag"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              );
+            })}
+            {sortedTagDefs.length === 0 && (
+              <p className="text-xs text-muted-foreground px-1.5 py-1">No tags yet</p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function Library() {
   const { showToast } = useToast();
   const { isDark } = useTheme();
@@ -1607,7 +1828,7 @@ export default function Library() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchWithinFolder, setSearchWithinFolder] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<"all" | "web" | "ai_answer" | "ai_prompt">("all");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
@@ -1842,102 +2063,18 @@ export default function Library() {
                     setSettingsOpen(true);
                   }}
                 />
-              <div className="flex gap-2 items-center">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSearchWithinFolder((v) => !v)}
-                className={cn(
-                  "h-9 shrink-0 gap-1.5",
-                  searchWithinFolder
-                    ? "text-primary bg-primary/10 hover:bg-primary/20 px-2.5"
-                    : "w-9 px-0 text-muted-foreground hover:text-foreground"
-                )}
-                title={searchWithinFolder ? "Searching in current folder — click to search all" : "Search all folders — click to scope to folder"}
-              >
-                <FolderSearch size={16} />
-                {searchWithinFolder && (
-                  <span className="text-xs font-medium">Current folder</span>
-                )}
-              </Button>
-              <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as typeof sourceFilter)}>
-                <SelectTrigger className="w-auto h-9 text-xs shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="ai_answer">AI Answers</SelectItem>
-                  <SelectItem value="ai_prompt">AI Prompts</SelectItem>
-                </SelectContent>
-              </Select>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
-                      "h-9 shrink-0 gap-1.5 px-2",
-                      (dateFrom || dateTo)
-                        ? "text-primary bg-primary/10 hover:bg-primary/20"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                    title="Filter by date added"
-                  >
-                    <CalendarDays size={15} />
-                    {(dateFrom || dateTo) && (
-                      <span className="text-xs font-medium">
-                        {dateFrom || "…"} → {dateTo || "…"}
-                      </span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-64 p-3 space-y-3" align="start">
-                  <p className="text-xs font-medium text-foreground">Date added</p>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground block">From</label>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      max={dateTo || undefined}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs text-muted-foreground block">To</label>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      min={dateFrom || undefined}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
-                    />
-                  </div>
-                  {(dateFrom || dateTo) && (
-                    <button
-                      className="text-xs text-muted-foreground hover:text-foreground underline"
-                      onClick={() => { setDateFrom(""); setDateTo(""); }}
-                    >
-                      Clear
-                    </button>
-                  )}
-                </PopoverContent>
-              </Popover>
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortKey)}>
-                <SelectTrigger className="w-auto h-9 text-xs shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="oldest">Oldest</SelectItem>
-                  <SelectItem value="name_asc">Name A→Z</SelectItem>
-                  <SelectItem value="name_desc">Name Z→A</SelectItem>
-                  <SelectItem value="last_opened">Last Opened</SelectItem>
-                  <SelectItem value="most_opened">Most Opened</SelectItem>
-                </SelectContent>
-              </Select>
-              </div>
+              <FilterBar
+                searchWithinFolder={searchWithinFolder}
+                onToggleSearchScope={() => setSearchWithinFolder((v) => !v)}
+                sourceFilter={sourceFilter}
+                onSourceFilterChange={setSourceFilter}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onDateFromChange={setDateFrom}
+                onDateToChange={setDateTo}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+              />
             </div>
           </div>
 
@@ -1981,11 +2118,19 @@ export default function Library() {
           {/* Two-column body */}
           <div ref={containerRef} className="flex flex-1 min-h-0">
             <div className="shrink-0 p-3 overflow-y-auto bg-sidebar" style={{ width: sidebarWidth }}>
-              <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2.5">Folders</div>
-              <FolderTree
+              <FolderSidebarPanel
                 state={state}
                 activeFolderId={currentFolderId}
                 isDark={isDark}
+                tagsExpanded={tagsExpanded}
+                onToggleTags={() => setTagsExpanded((v) => !v)}
+                activeTagFilter={activeTagFilter}
+                onTagFilterChange={setActiveTagFilter}
+                allBookmarks={allBookmarks}
+                sortedTagDefs={sortedTagDefs}
+                emptyFolderIds={emptyFolderIds}
+                rootFolderCount={rootFolderCount}
+                onDeleteTag={handleDeleteTag}
                 onSelectFolder={handleSelectFolder}
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
@@ -1993,59 +2138,7 @@ export default function Library() {
                 onRequestRename={(title, currentName, onCommit) =>
                   setRenameDialog({ title, currentName, onConfirm: onCommit })
                 }
-                emptyFolderIds={emptyFolderIds}
-                rootFolderCount={rootFolderCount}
               />
-              {/* Tags section */}
-              <div className="mt-4 pt-4 border-t border-border px-2">
-                <button
-                  onClick={() => setTagsExpanded((v) => !v)}
-                  className="flex items-center gap-1.5 w-full text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1.5 hover:text-foreground transition-colors"
-                >
-                  {tagsExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                  Tags
-                </button>
-                {tagsExpanded && (
-                  <div className="space-y-0.5">
-                    {sortedTagDefs.map((tag) => {
-                      const colorEntry = tag.color ? FOLDER_COLORS[tag.color] : null;
-                      const colorHex = colorEntry ? (isDark ? colorEntry.dark : colorEntry.light) : null;
-                      const count = allBookmarks.filter((b) => (b.tags ?? []).includes(tag.id)).length;
-                      return (
-                        <div key={tag.id} className="group/tag relative flex items-center">
-                          <button
-                            onClick={() => setActiveTagFilter(activeTagFilter === tag.id ? null : tag.id)}
-                            className={cn(
-                              "flex items-center gap-1.5 flex-1 rounded px-1.5 py-1 text-sm text-left transition-colors pr-6",
-                              count === 0 ? "opacity-50" : "",
-                              activeTagFilter === tag.id
-                                ? "bg-primary/10 text-primary"
-                                : "hover:bg-accent/50 text-foreground",
-                            )}
-                          >
-                            <span
-                              className="w-2 h-2 rounded-full shrink-0 border border-border/50"
-                              style={{ background: colorHex ?? "transparent" }}
-                            />
-                            <span className="truncate flex-1">#{tag.name}</span>
-                            <span className="text-[10px] text-muted-foreground">{count}</span>
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id); }}
-                            className="absolute right-1 opacity-0 group-hover/tag:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground"
-                            title="Delete tag"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                    {sortedTagDefs.length === 0 && (
-                      <p className="text-xs text-muted-foreground px-1.5 py-1">No tags yet</p>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
             {/* Drag divider */}
             <div

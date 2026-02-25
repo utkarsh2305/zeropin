@@ -1,19 +1,17 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import { setPrefs, type Prefs } from "../../core/storage/prefs";
-import { getState, deleteBookmark, exportState, importState, renameBookmark, moveBookmark, reorderBookmarks, moveFolderToParent, setBookmarkNotes, bulkDeleteBookmarks, bulkMoveBookmarks, bulkSetBookmarkReminder, recordBookmarkOpen, addPageBookmark, addSelectionBookmark, createTag, deleteTag, setBookmarkTags, setBookmarkReminder, snoozeBookmarkReminder, dismissBookmarkReminder, updateDeadLinkResults } from "../../core/storage/local";
-import { setPendingSave, updateRecents } from "../../core/storage/recents";
+import { createTag, deleteTag, recordBookmarkOpen } from "../../core/storage/local";
 import { useLibraryState } from "../hooks/useLibraryState";
 import { useFolderOps, notifyFoldersChanged } from "../hooks/useFolderOps";
 import type { ConfirmDialogState } from "../hooks/useFolderOps";
-import { parseBrowserHtml, detectBrowserSource, buildImportPreview, browserSourceLabel, commitBrowserImport, BOOKMARK_CAP } from "../../core/storage/importBrowser";
-import type { BrowserImportPreview } from "../../core/storage/importBrowser";
+import { useBookmarkOps } from "../hooks/useBookmarkOps";
+import { browserSourceLabel, BOOKMARK_CAP } from "../../core/storage/importBrowser";
 import type { LibraryState, Bookmark, Folder, TagDef } from "../../core/types";
 import { useTheme } from "../theme";
 import { useToast } from "../Toast";
-import { draggable, dropTargetForElements, monitorForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { draggable, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { attachClosestEdge, extractClosestEdge } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import type { Edge } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
-import { reorder } from "@atlaskit/pragmatic-drag-and-drop/reorder";
 import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -1609,15 +1607,10 @@ export default function Library() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchWithinFolder, setSearchWithinFolder] = useState(false);
-  const [expandedNotes, setExpandedNotes] = useState<Record<string, { open: boolean; draft: string }>>({});
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState<"all" | "web" | "ai_answer" | "ai_prompt">("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
-  const [browserImportPreview, setBrowserImportPreview] = useState<BrowserImportPreview | null>(null);
-  const [includeDups, setIncludeDups] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [renameDialog, setRenameDialog] = useState<{
     title: string;
@@ -1634,11 +1627,6 @@ export default function Library() {
 
   const [remindersCollapsed, setRemindersCollapsed] = useState(false);
   const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter | null>(null);
-  const [deadLinkChecking, setDeadLinkChecking] = useState(false);
-  const [deadLinkProgress, setDeadLinkProgress] = useState(0);
-  const [deadLinkTotal, setDeadLinkTotal] = useState(0);
-  const [showDeadLinkModal, setShowDeadLinkModal] = useState(false);
-  const [deadLinkModalResult, setDeadLinkModalResult] = useState<{ dead: number; total: number } | null>(null);
 
   // Global ? shortcut for shortcuts cheat-sheet
   useEffect(() => {
@@ -1651,82 +1639,6 @@ export default function Library() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, isFolderModalOpen, browserImportPreview]);
-
-  /* ─── DnD monitor ──────────────────────────────────────────── */
-
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
-  const handleDrop = useCallback(async ({ source, location }: { source: { data: Record<string | symbol, unknown> }; location: { current: { dropTargets: { data: Record<string | symbol, unknown> }[] } } }) => {
-    const target = location.current.dropTargets[0];
-    if (!target) return;
-
-    const sourceData = source.data as DragItemData;
-    const targetData = target.data as DragItemData;
-    const currentState = stateRef.current;
-    if (!currentState) return;
-
-    const doRefresh = async () => { const s = await getState(); setState(s); };
-
-    if (sourceData.type === "bookmark" && targetData.type === "folder") {
-      if (sourceData.folderId !== targetData.folderId && sourceData.bookmarkId) {
-        try {
-          await moveBookmark(sourceData.bookmarkId, targetData.folderId!);
-          await doRefresh();
-          showToast("Moved to " + (currentState.folders[targetData.folderId!]?.name ?? "folder"));
-        } catch (err) {
-          console.error("Failed to move bookmark", err);
-        }
-      }
-      return;
-    }
-
-    if (sourceData.type === "bookmark" && targetData.type === "bookmark" && sourceData.bookmarkId !== targetData.bookmarkId) {
-      const edge = extractClosestEdge(target.data);
-      const folderBookmarks = Object.values(currentState.bookmarks)
-        .filter((b) => b.folderId === sourceData.folderId)
-        .sort((a, b) => Number(b.sortKey) - Number(a.sortKey));
-      const startIndex = folderBookmarks.findIndex((b) => b.id === sourceData.bookmarkId);
-      let finishIndex = folderBookmarks.findIndex((b) => b.id === targetData.bookmarkId);
-      if (startIndex !== -1 && finishIndex !== -1) {
-        if (edge === "bottom" && startIndex < finishIndex) {
-          // Already correct
-        } else if (edge === "top" && startIndex > finishIndex) {
-          // Already correct
-        } else if (edge === "bottom") {
-          finishIndex = finishIndex + 1;
-        } else if (edge === "top") {
-          finishIndex = finishIndex - 1;
-        }
-        finishIndex = Math.max(0, Math.min(finishIndex, folderBookmarks.length - 1));
-        const reordered = reorder({ list: folderBookmarks, startIndex, finishIndex });
-        try {
-          await reorderBookmarks(reordered.map((b) => b.id));
-          await doRefresh();
-        } catch (err) {
-          console.error("Failed to reorder", err);
-        }
-      }
-      return;
-    }
-
-    if (sourceData.type === "folder" && targetData.type === "folder" && sourceData.folderId !== targetData.folderId) {
-      try {
-        await moveFolderToParent(sourceData.folderId!, targetData.folderId!);
-        await doRefresh();
-        showToast("Folder moved");
-      } catch (err) {
-        console.error("Failed to move folder", err);
-        showToast("Cannot move folder there", "error");
-      }
-    }
-  }, [showToast]);
-
-  useEffect(() => {
-    return monitorForElements({
-      onDrop: handleDrop,
-    });
-  }, [handleDrop]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -1766,50 +1678,15 @@ export default function Library() {
     dashboardFilter,
   });
 
-  const handlePickerSave = async (folderId: string) => {
-    if (!pendingSave) return;
-    try {
-      const tags = pickerTagIds.length > 0 ? pickerTagIds : undefined;
-      if (pendingSave.selectionText) {
-        await addSelectionBookmark({
-          url: pendingSave.url,
-          title: pendingSave.title,
-          selectedText: pendingSave.selectionText,
-          anchor: pendingSave.anchor,
-          folderId,
-          tags,
-        });
-      } else if (pendingSave.ytResult?.kind === "youtube") {
-        const media = {
-          kind: "youtube" as const,
-          videoId: pendingSave.ytResult.videoId,
-          timestampSec: pendingSave.ytResult.timestampSec,
-          timestampLabel: pendingSave.ytResult.timestampLabel,
-          canonicalUrl: pendingSave.ytResult.canonicalUrl,
-          openUrl: pendingSave.ytResult.openUrl,
-          captureMethod: pendingSave.ytResult.captureMethod,
-        };
-        await addPageBookmark(pendingSave.ytResult.openUrl, pendingSave.title, media, folderId, tags);
-      } else {
-        await addPageBookmark(pendingSave.url, pendingSave.title, undefined, folderId, tags);
-      }
-
-      await updateRecents(folderId);
-      await setPendingSave(null);
-      setPendingSaveState(null);
-      await refreshState();
-
-      chrome.runtime.sendMessage({ type: "ZP_FOLDERS_CHANGED" }).catch(() => {});
-
-      const folderName = state?.folders[folderId]?.name ?? "folder";
-      showToast(`Saved to ${folderName}`);
-
-      setTimeout(() => window.close(), 1200);
-    } catch (err) {
-      console.error("ZP: picker save failed", err);
-      showToast("Save failed", "error");
-    }
-  };
+  const bookmarkOps = useBookmarkOps({
+    state: _safeState,
+    refreshState,
+    showToast,
+    pendingSave,
+    setPendingSaveState,
+    pickerTagIds,
+    setConfirmDialog,
+  });
 
   const folderOps = useFolderOps({
     state: _safeState,
@@ -1820,7 +1697,7 @@ export default function Library() {
     currentFolderId: _currentFolderId,
     isPickerMode,
     pendingSave,
-    onPickerSave: handlePickerSave,
+    onPickerSave: bookmarkOps.handlePickerSave,
     setConfirmDialog,
     setDashboardFilter,
   });
@@ -1855,71 +1732,41 @@ export default function Library() {
     handleSetFolderColor,
   } = folderOps;
 
+  const {
+    expandedNotes,
+    setExpandedNotes,
+    bulkMode,
+    setBulkMode,
+    selectedIds,
+    setSelectedIds,
+    browserImportPreview,
+    setBrowserImportPreview,
+    includeDups,
+    setIncludeDups,
+    deadLinkChecking,
+    deadLinkProgress,
+    deadLinkTotal,
+    showDeadLinkModal,
+    setShowDeadLinkModal,
+    deadLinkModalResult,
+    handleDeleteBookmark,
+    handleCheckDeadLinks,
+    handlePickerSave,
+    handleRenameBookmark,
+    handleSetBookmarkTags,
+    handleDismissReminder,
+    handleSnoozeReminder,
+    handleBulkSetReminder,
+    handleSaveReminderDirect,
+    handleSetBookmarkNotes,
+    handleOpenBookmark,
+    handleBrowserFileSelected,
+    handleBrowserImportConfirm,
+    handleExport,
+    handleImport,
+  } = bookmarkOps;
+
   /* ─── Handlers ─────────────────────────────────────────────── */
-
-  const handleDeleteBookmark = (id: string) => {
-    setConfirmDialog({
-      title: "Delete bookmark?",
-      description: "This cannot be undone.",
-      onConfirm: async () => {
-        await deleteBookmark(id);
-        chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
-        await refreshState();
-        showToast("Bookmark deleted");
-      },
-    });
-  };
-
-  const handleCheckDeadLinks = async () => {
-    if (deadLinkChecking) return;
-    const bookmarkList = Object.values(state.bookmarks);
-    if (bookmarkList.length === 0) return;
-    setDeadLinkChecking(true);
-    setDeadLinkProgress(0);
-    setDeadLinkTotal(bookmarkList.length);
-    showToast("Checking your links in the background — keep using ZeroPin as normal. We'll let you know when it's done.", "info");
-    const BATCH = 10;
-    const deadIds: string[] = [];
-    for (let i = 0; i < bookmarkList.length; i += BATCH) {
-      const batch = bookmarkList.slice(i, i + BATCH);
-      await Promise.all(batch.map(async (b) => {
-        try {
-          const res = await fetch(b.url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
-          if (res.status === 404 || res.status === 410) deadIds.push(b.id);
-        } catch { /* timeout / CORS / network error = treat as working */ }
-      }));
-      setDeadLinkProgress(Math.min(i + BATCH, bookmarkList.length));
-      if (i + BATCH < bookmarkList.length) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-    }
-    await updateDeadLinkResults(bookmarkList.map((b) => ({ id: b.id, isDeadLink: deadIds.includes(b.id) })));
-    setDeadLinkChecking(false);
-    setDeadLinkModalResult({ dead: deadIds.length, total: bookmarkList.length });
-    setShowDeadLinkModal(true);
-    await refreshState();
-  };
-
-  const handleRenameBookmark = async (id: string, name: string) => {
-    try {
-      await renameBookmark(id, name);
-      await refreshState();
-      showToast("Bookmark renamed");
-    } catch (err) {
-      console.error("Failed to rename bookmark", err);
-      showToast("Failed to rename bookmark", "error");
-    }
-  };
-
-  const handleSetBookmarkTags = async (bookmarkId: string, tagIds: string[]) => {
-    try {
-      await setBookmarkTags(bookmarkId, tagIds);
-      await refreshState();
-    } catch (err) {
-      console.error("Failed to update tags", err);
-      showToast("Failed to update tags", "error");
-    }
-  };
 
   const handleDeleteTag = async (tagId: string) => {
     try {
@@ -1929,169 +1776,6 @@ export default function Library() {
     } catch (err) {
       console.error("Failed to delete tag", err);
       showToast("Failed to delete tag", "error");
-    }
-  };
-
-  const handleDismissReminder = async (bookmarkId: string) => {
-    try {
-      await dismissBookmarkReminder(bookmarkId);
-      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
-      await refreshState();
-    } catch (err) {
-      console.error("Failed to dismiss reminder", err);
-    }
-  };
-
-  const handleSnoozeReminder = async (bookmarkId: string, days: number) => {
-    try {
-      const untilMs = Date.now() + days * 24 * 60 * 60 * 1000;
-      await snoozeBookmarkReminder(bookmarkId, untilMs);
-      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
-      await refreshState();
-    } catch (err) {
-      console.error("Failed to snooze reminder", err);
-    }
-  };
-
-  const handleBulkSetReminder = async (days: number) => {
-    try {
-      const untilMs = Date.now() + days * 24 * 60 * 60 * 1000;
-      await bulkSetBookmarkReminder([...selectedIds], untilMs);
-      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
-      setSelectedIds(new Set());
-      setBulkMode(false);
-      await refreshState();
-    } catch (err) {
-      console.error("Failed to set bulk reminder", err);
-    }
-  };
-
-  const handleSaveReminderDirect = async (bookmarkId: string, reminderAt: number | null) => {
-    try {
-      await setBookmarkReminder(bookmarkId, reminderAt);
-      chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" }).catch(() => {});
-      await refreshState();
-    } catch (err) {
-      console.error("Failed to save reminder", err);
-    }
-  };
-
-  const handleSetBookmarkNotes = async (id: string, notes: string) => {
-    try {
-      await setBookmarkNotes(id, notes);
-      await refreshState();
-      setExpandedNotes((prev) => ({ ...prev, [id]: { open: false, draft: "" } }));
-      showToast("Notes saved");
-    } catch (err) {
-      console.error("Failed to save notes", err);
-      showToast("Failed to save notes", "error");
-    }
-  };
-
-  const handleOpenBookmark = (b: Bookmark) => {
-    recordBookmarkOpen(b.id);
-    if (b.type === "SNIPPET" && b.snippet) {
-      chrome.storage.local.set(
-        {
-          ZP_HIGHLIGHT_REQUEST: {
-            url: b.url,
-            anchor: b.snippet,
-            bookmarkId: b.id,
-            // eslint-disable-next-line react-hooks/purity
-            timestamp: Date.now(),
-          },
-        },
-        () => {
-          const err = chrome.runtime.lastError;
-          if (err) { console.warn(`ZP: Failed to write highlight request: ${err.message}`); return; }
-          chrome.tabs.create({ url: b.url });
-        }
-      );
-    } else {
-      window.open(b.url, "_blank");
-    }
-  };
-
-  const handleBrowserFileSelected = async (file: File) => {
-    try {
-      const html = await file.text();
-      const source = detectBrowserSource(html);
-      const parsed = parseBrowserHtml(html);
-      if (parsed.bookmarks.length === 0) {
-        showToast("No bookmarks found in this file", "error");
-        return;
-      }
-      const preview = await buildImportPreview(parsed, source);
-      setIncludeDups(false);
-      setBrowserImportPreview(preview);
-    } catch (err) {
-      console.error("Failed to parse browser bookmarks", err);
-      showToast("Failed to read file", "error");
-    }
-  };
-
-  const handleBrowserImportConfirm = async () => {
-    if (!browserImportPreview) return;
-    const available = BOOKMARK_CAP - browserImportPreview.currentBookmarkCount;
-    const willImport = Math.min(
-      (includeDups ? browserImportPreview.newCount + browserImportPreview.dupCount : browserImportPreview.newCount),
-      Math.max(0, available),
-    );
-    if (willImport === 0) {
-      setBrowserImportPreview(null);
-      return;
-    }
-    try {
-      const { imported, dupSkipped, capSkipped } = await commitBrowserImport(
-        browserImportPreview._folders,
-        browserImportPreview._bookmarks,
-        browserImportPreview.source,
-        includeDups,
-      );
-      setBrowserImportPreview(null);
-      await refreshState();
-      const parts: string[] = [`Imported ${imported} bookmark${imported !== 1 ? "s" : ""}`];
-      if (dupSkipped > 0) parts.push(`${dupSkipped} duplicate${dupSkipped !== 1 ? "s" : ""} skipped`);
-      if (capSkipped > 0) parts.push(`${capSkipped} skipped (cap reached)`);
-      showToast(parts.join(" · "));
-    } catch (err) {
-      console.error("Failed to import browser bookmarks", err);
-      showToast("Import failed", "error");
-    }
-  };
-
-  const handleExport = async () => {
-    try {
-      const data = await exportState();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `zeropin-export-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showToast("Library exported");
-    } catch (err) {
-      console.error("Failed to export", err);
-      showToast("Failed to export", "error");
-    }
-  };
-
-  const handleImport = async (file: File) => {
-    const isHtml = file.name.toLowerCase().endsWith(".html") || file.name.toLowerCase().endsWith(".htm");
-    if (isHtml) {
-      await handleBrowserFileSelected(file);
-      return;
-    }
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      await importState(data);
-      await refreshState();
-      showToast("Library imported!");
-    } catch (err) {
-      console.error("Failed to import", err);
-      showToast("Failed to import", "error");
     }
   };
 

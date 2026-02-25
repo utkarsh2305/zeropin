@@ -1402,9 +1402,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
-  searchQuery: string;
-  onSearchChange: (q: string) => void;
+function TopBar({ onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
   onCreateFolder: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
@@ -1415,14 +1413,7 @@ function TopBar({ searchQuery, onSearchChange, onCreateFolder, onExport, onImpor
   const { preference, toggle } = useTheme();
 
   return (
-    <div className="flex gap-2 flex-wrap items-center">
-      <Input
-        type="text"
-        placeholder="Search bookmarks\u2026"
-        value={searchQuery}
-        onChange={(e) => onSearchChange(e.target.value)}
-        className="flex-1 min-w-50 h-9"
-      />
+    <div className="flex gap-1 items-center shrink-0">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
@@ -2008,8 +1999,9 @@ export default function Library() {
         <div className="w-full h-screen overflow-hidden bg-card flex flex-col">
           {/* Header */}
           <div className="sticky top-0 z-10 bg-card border-b border-border p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
+            {/* Row 1: brand | search | folder name */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2.5 shrink-0">
                 <BrandIcon size={22} />
                 <span className="font-bold text-lg tracking-tight text-foreground">ZeroPin</span>
                 <Tooltip>
@@ -2026,30 +2018,52 @@ export default function Library() {
                   <TooltipContent>How to use</TooltipContent>
                 </Tooltip>
               </div>
-              <div className="text-right">
+              <Input
+                type="text"
+                placeholder="Search bookmarks\u2026"
+                value={searchQuery}
+                onChange={(e) => { setSearchQuery(e.target.value); if (e.target.value.trim()) setDashboardFilter(null); }}
+                className="flex-1 h-9"
+              />
+              <div className="text-right shrink-0">
                 <div className="text-xs text-muted-foreground">Folder</div>
                 <div className="text-sm font-semibold text-foreground">
                   {state.folders[currentFolderId]?.name ?? "ZeroPin"}
                 </div>
               </div>
             </div>
-            <div className="mt-2.5 flex flex-col gap-2">
-                <HealthDashboard
-                  unreadCount={unreadBookmarks.length}
-                  deadCount={deadLinkBookmarks.length}
-                  emptyCount={emptyFolderList.length}
-                  deadLinkChecking={deadLinkChecking}
-                  deadLinkProgress={deadLinkProgress}
-                  deadLinkTotal={deadLinkTotal}
-                  activeFilter={dashboardFilter}
-                  unreadThreshold={prefs.unreadThresholdDays ?? 60}
-                  onUnreadClick={() => setDashboardFilter((f) => f === "unread" ? null : "unread")}
-                  onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
-                  onEmptyFoldersClick={() => setDashboardFilter((f) => f === "emptyfolders" ? null : "emptyfolders")}
-                />
+            {/* Row 2: health dashboard */}
+            <div className="mt-2">
+              <HealthDashboard
+                unreadCount={unreadBookmarks.length}
+                deadCount={deadLinkBookmarks.length}
+                emptyCount={emptyFolderList.length}
+                deadLinkChecking={deadLinkChecking}
+                deadLinkProgress={deadLinkProgress}
+                deadLinkTotal={deadLinkTotal}
+                activeFilter={dashboardFilter}
+                unreadThreshold={prefs.unreadThresholdDays ?? 60}
+                onUnreadClick={() => setDashboardFilter((f) => f === "unread" ? null : "unread")}
+                onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
+                onEmptyFoldersClick={() => setDashboardFilter((f) => f === "emptyfolders" ? null : "emptyfolders")}
+              />
+            </div>
+            {/* Row 3: filter controls + action buttons */}
+            <div className="mt-2 flex items-center gap-2">
+              <FilterBar
+                searchWithinFolder={searchWithinFolder}
+                onToggleSearchScope={() => setSearchWithinFolder((v) => !v)}
+                sourceFilter={sourceFilter}
+                onSourceFilterChange={setSourceFilter}
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                onDateFromChange={setDateFrom}
+                onDateToChange={setDateTo}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+              />
+              <div className="ml-auto pl-2 border-l border-border">
                 <TopBar
-                  searchQuery={searchQuery}
-                  onSearchChange={(q) => { setSearchQuery(q); if (q.trim()) setDashboardFilter(null); }}
                   onCreateFolder={handleCreateFolder}
                   onExport={handleExport}
                   onImport={handleImport}
@@ -2063,18 +2077,7 @@ export default function Library() {
                     setSettingsOpen(true);
                   }}
                 />
-              <FilterBar
-                searchWithinFolder={searchWithinFolder}
-                onToggleSearchScope={() => setSearchWithinFolder((v) => !v)}
-                sourceFilter={sourceFilter}
-                onSourceFilterChange={setSourceFilter}
-                dateFrom={dateFrom}
-                dateTo={dateTo}
-                onDateFromChange={setDateFrom}
-                onDateToChange={setDateTo}
-                sortBy={sortBy}
-                onSortChange={setSortBy}
-              />
+              </div>
             </div>
           </div>
 

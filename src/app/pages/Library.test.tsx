@@ -1,10 +1,19 @@
 /**
- * Unit tests for Library UI logic:
- * - Global search filtering
- * - Recently pinned sorting/limiting
- * - Bulk selection state management
+ * Unit tests for Library UI logic.
+ * We test pure logic that Library.tsx / useFilterPipeline use, not React components.
  *
- * We test the pure logic that Library.tsx uses, not the React components themselves.
+ * Suites:
+ * - Global search filtering
+ * - Multi-tag intersection filter
+ * - Favourites and notes filter
+ * - Multi-folder search scope
+ * - Note truncation
+ * - Sort options
+ * - Open count display
+ * - Bulk selection
+ * - Folder display sort
+ * - Keyboard navigation (getAdjacentId)
+ * - Tag helpers (filterByTag, getAllTagsSorted, getTagCount)
  */
 import { describe, it, expect } from "vitest";
 import type { Bookmark, Folder, TagDef } from "../../core/types";
@@ -44,10 +53,24 @@ function filterByFolder(bookmarks: Bookmark[], folderId: string, isSearching: bo
   return bookmarks.filter((b) => b.folderId === folderId);
 }
 
-// ── Re-implement recent pins logic (mirrors RecentPins component) ──
+// ── Re-implement multi-tag intersection (mirrors useFilterPipeline) ──
 
-function getRecentPins(bookmarks: Bookmark[], limit = 10): Bookmark[] {
-  return [...bookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, limit);
+function filterByTagIntersection(bookmarks: Bookmark[], tagIds: string[]): Bookmark[] {
+  if (tagIds.length === 0) return bookmarks;
+  return bookmarks.filter((b) => tagIds.every((t) => (b.tags ?? []).includes(t)));
+}
+
+// ── Re-implement multi-folder scope (mirrors BookmarkList) ──
+
+function filterByFolderScope(
+  bookmarks: Bookmark[],
+  folderIds: string[],
+  activeFolderId: string,
+  isSearching: boolean,
+): Bookmark[] {
+  if (folderIds.length > 0) return bookmarks.filter((b) => folderIds.includes(b.folderId));
+  if (isSearching) return bookmarks;
+  return bookmarks.filter((b) => b.folderId === activeFolderId);
 }
 
 // ── Helper: create test folder ──
@@ -113,40 +136,106 @@ describe("Global search filtering", () => {
 
 // ── Recently Pinned ──
 
-describe("Recently pinned logic", () => {
-  it("sorted by createdAt descending", () => {
-    const bookmarks = [
-      makeBookmark({ id: "1", createdAt: 1000 }),
-      makeBookmark({ id: "2", createdAt: 3000 }),
-      makeBookmark({ id: "3", createdAt: 2000 }),
-    ];
-    const recent = getRecentPins(bookmarks);
-    expect(recent.map((b) => b.id)).toEqual(["2", "3", "1"]);
+// ── Multi-tag intersection ──
+
+describe("Multi-tag intersection filter", () => {
+  const b1 = makeBookmark({ id: "b1", tags: ["t1", "t2", "t3"] });
+  const b2 = makeBookmark({ id: "b2", tags: ["t1", "t2"] });
+  const b3 = makeBookmark({ id: "b3", tags: ["t1"] });
+  const b4 = makeBookmark({ id: "b4" }); // no tags
+
+  it("empty filter returns all bookmarks", () => {
+    expect(filterByTagIntersection([b1, b2, b3, b4], []).map((b) => b.id))
+      .toEqual(["b1", "b2", "b3", "b4"]);
   });
 
-  it("limited to 10 items", () => {
-    const bookmarks = Array.from({ length: 15 }, (_, i) =>
-      makeBookmark({ id: `b${i}`, createdAt: i * 1000 })
-    );
-    const recent = getRecentPins(bookmarks);
-    expect(recent.length).toBe(10);
-    // Most recent first
-    expect(recent[0].id).toBe("b14");
+  it("single tag filters correctly", () => {
+    expect(filterByTagIntersection([b1, b2, b3, b4], ["t1"]).map((b) => b.id))
+      .toEqual(["b1", "b2", "b3"]);
   });
 
-  it("with fewer than 10 bookmarks shows all", () => {
-    const bookmarks = [
-      makeBookmark({ id: "1", createdAt: 1000 }),
-      makeBookmark({ id: "2", createdAt: 2000 }),
-    ];
-    const recent = getRecentPins(bookmarks);
-    expect(recent.length).toBe(2);
+  it("two tags — bookmark must have BOTH", () => {
+    expect(filterByTagIntersection([b1, b2, b3, b4], ["t1", "t2"]).map((b) => b.id))
+      .toEqual(["b1", "b2"]);
   });
 
-  it("hidden during search mode (logic check)", () => {
-    const isSearching = true;
-    const showRecentPins = !isSearching;
-    expect(showRecentPins).toBe(false);
+  it("three tags — only bookmark with all three survives", () => {
+    expect(filterByTagIntersection([b1, b2, b3, b4], ["t1", "t2", "t3"]).map((b) => b.id))
+      .toEqual(["b1"]);
+  });
+
+  it("no bookmark satisfies an impossible intersection", () => {
+    expect(filterByTagIntersection([b1, b2, b3, b4], ["t1", "t99"])).toEqual([]);
+  });
+
+  it("bookmark with no tags field is excluded when filter is active", () => {
+    expect(filterByTagIntersection([b4], ["t1"])).toEqual([]);
+  });
+});
+
+// ── Favourites and notes filter ──
+
+describe("Favourites and notes filter", () => {
+  const fav  = makeBookmark({ id: "fav",  isFavorite: true,  notes: "" });
+  const note = makeBookmark({ id: "note", isFavorite: false, notes: "some note" });
+  const both = makeBookmark({ id: "both", isFavorite: true,  notes: "important" });
+  const none = makeBookmark({ id: "none" });
+
+  it("favourites filter returns only isFavorite bookmarks", () => {
+    const result = [fav, note, both, none].filter((b) => !!b.isFavorite);
+    expect(result.map((b) => b.id)).toEqual(["fav", "both"]);
+  });
+
+  it("notes filter returns only bookmarks with non-empty notes", () => {
+    const result = [fav, note, both, none].filter((b) => !!b.notes?.trim());
+    expect(result.map((b) => b.id)).toEqual(["note", "both"]);
+  });
+
+  it("bookmark with empty string notes is excluded from notes filter", () => {
+    const b = makeBookmark({ id: "x", notes: "   " });
+    expect([b].filter((bk) => !!bk.notes?.trim())).toEqual([]);
+  });
+
+  it("bookmark without isFavorite is excluded from favourites filter", () => {
+    expect([none].filter((b) => !!b.isFavorite)).toEqual([]);
+  });
+});
+
+// ── Multi-folder search scope ──
+
+describe("Multi-folder search scope", () => {
+  const bA = makeBookmark({ id: "bA", folderId: "folderA" });
+  const bB = makeBookmark({ id: "bB", folderId: "folderB" });
+  const bC = makeBookmark({ id: "bC", folderId: "folderC" });
+
+  it("no scope + not searching: shows only active folder", () => {
+    const result = filterByFolderScope([bA, bB, bC], [], "folderA", false);
+    expect(result.map((b) => b.id)).toEqual(["bA"]);
+  });
+
+  it("no scope + searching: shows all folders", () => {
+    const result = filterByFolderScope([bA, bB, bC], [], "folderA", true);
+    expect(result.map((b) => b.id)).toEqual(["bA", "bB", "bC"]);
+  });
+
+  it("single folder scope limits results to that folder regardless of search", () => {
+    const result = filterByFolderScope([bA, bB, bC], ["folderB"], "folderA", false);
+    expect(result.map((b) => b.id)).toEqual(["bB"]);
+  });
+
+  it("multi-folder scope includes bookmarks from each selected folder", () => {
+    const result = filterByFolderScope([bA, bB, bC], ["folderA", "folderC"], "folderA", false);
+    expect(result.map((b) => b.id)).toEqual(["bA", "bC"]);
+  });
+
+  it("multi-folder scope with search still restricts to selected folders", () => {
+    const result = filterByFolderScope([bA, bB, bC], ["folderA", "folderB"], "folderC", true);
+    expect(result.map((b) => b.id)).toEqual(["bA", "bB"]);
+  });
+
+  it("scope with unknown folder ID returns empty", () => {
+    const result = filterByFolderScope([bA, bB, bC], ["folderX"], "folderA", false);
+    expect(result).toEqual([]);
   });
 });
 

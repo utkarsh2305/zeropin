@@ -14,20 +14,31 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Snippet card follows your selected theme (dark/light/system)
 
 **Library**
-- Folder hierarchy with collapsible tree and drag-and-drop reordering
-- Search across name, URL, domain, snippet text, and notes
-- Source filter: All / Web / AI Answers / AI Prompts (with domain-based fallback)
+- Folder hierarchy with collapsible tree, drag-and-drop reordering, and custom emoji icons
+- Empty folder indicator — subtle grey dot on empty folder rows in the sidebar tree
+- Search across name, URL, domain, snippet text, and notes with inline clear (×) button
+- Multi-folder search scope — folder scope picker next to the search bar; select one or more folders to constrain results, rendered as a tree with 5 px per depth level
+- Multi-tag intersection filtering — bookmark must match **all** selected tags to appear
+- Sidebar tag narrowing — tag list automatically collapses to only tags present in the current result set, accounting for active search query, dashboard filter, and tag filters
 - Page grouping by URL with collapsible groups
-- Inline rename, notes, bulk select, bulk move/delete
-- Export/import library as JSON
+- Favourites — heart button on each card; dedicated chip on the health dashboard
+- Notes per bookmark; notes chip on the health dashboard filters to bookmarks with saved notes
+- Dead link detection — on-demand scan with progress indicator; chip filters to broken URLs
+- Reminders with specific time — reminder picker includes a time input; quick presets default to 09:00; due reminders surfaced in the Reminders panel and popup badge
+- Inline rename for bookmarks and folders (no modal dialog)
+- Bulk select with bulk move, delete, and tag add/remove
+- Date range filter
+- Keyboard shortcuts: ↑ ↓ navigate · Enter open · E rename · Delete remove · ? shortcuts panel
+- Export/import library as JSON; import from browser bookmark HTML files (Chrome, Firefox, Safari, Edge)
 
 **Popup**
-- Compact toolbar popup with search, recent pins, and current folder shortcut
+- Compact toolbar popup with search and current folder shortcut
 - Quick access to full Library
+- Reminder badge when due reminders exist; due reminders listed inline
 
 **Theme**
 - Auto-detects system dark/light mode
-- Manual override cycling: System > Dark > Light
+- Manual override cycling: System → Dark → Light
 - Persisted preference with migration from legacy format
 
 ## Tech Stack
@@ -38,8 +49,8 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - **Icons**: lucide-react + custom BrandIcon SVG
 - **DnD**: @atlaskit/pragmatic-drag-and-drop
 - **Build**: Vite 7 (multi-entry: popup, library, walkthrough, background, contentScript)
-- **Testing**: Vitest + jsdom (136 tests)
-- **Storage**: chrome.storage.local with schema migrations (v0-v5)
+- **Testing**: Vitest + jsdom (406 tests across 12 suites)
+- **Storage**: chrome.storage.local with schema migrations (v0–v10)
 
 ## Getting Started
 
@@ -58,7 +69,7 @@ npm run build
 npm run dev       # Vite dev server (for UI development)
 npm run build     # TypeScript check + production build
 npm run lint      # ESLint
-npm test          # Run all tests
+npm test          # Run all tests (406)
 ```
 
 ## Project Structure
@@ -68,25 +79,35 @@ src/
   main.tsx              # Popup entry point
   library.tsx           # Library page entry point
   walkthrough.tsx       # Walkthrough page entry point
-  background.ts         # Service worker (context menus, commands)
+  background.ts         # Service worker (context menus, commands, reminders)
   contentScript.ts      # Content script (selection, AI detection, highlighting)
   app/
     BrandIcon.tsx       # ZeroPin brand icon SVG component
     Toast.tsx           # Toast notification provider
     theme.ts            # Dark mode hook + ThemeContext
+    hooks/
+      useFilterPipeline.ts  # Derived filter state: search, tags, dashboard KPIs
+      useBookmarkOps.ts     # Bookmark CRUD + drag-and-drop handlers
+      useFolderOps.ts       # Folder CRUD handlers
+      useLibraryState.ts    # chrome.storage state + prefs loading
     pages/
       Library.tsx       # Full library manager
       Walkthrough.tsx   # Interactive onboarding demo
   core/
-    types.ts            # Bookmark, Folder, LibraryState types
+    types.ts            # Bookmark, Folder, TagDef, LibraryState types
+    constants.ts        # AI chat domain set (shared across content script + library)
     anchor.ts           # Text-quote anchoring for snippet highlights
     youtube.ts          # YouTube URL utilities and capture types
+    aiTags.ts           # Heuristic + Gemini Nano tag suggestions
     storage/
-      local.ts          # CRUD operations on chrome.storage.local
-      migrate.ts        # Schema migration framework
+      chromeApi.ts      # Shared chrome.storage.local primitives
+      local.ts          # CRUD operations + atomic write queue
+      migrate.ts        # Schema migration framework (v0–v10)
+      prefs.ts          # User preferences (theme, reminders, AI tags)
+      importBrowser.ts  # Browser bookmark HTML parser (Chrome/Firefox/Safari/Edge)
   components/ui/        # shadcn/ui components
 public/
-  manifest.json         # Chrome extension manifest
+  manifest.json         # Chrome extension manifest (MV3)
   icons/                # Extension icons (SVG source + PNGs)
 scripts/
   generate-icons.mjs    # PNG generation from SVG source

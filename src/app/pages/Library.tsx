@@ -24,6 +24,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut } from "@/components/ui/command";
 import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Link2, Heart, StickyNote } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
@@ -962,6 +963,21 @@ type PageGroup = {
   bookmarks: Bookmark[];
 };
 
+function openBookmark(b: Bookmark): void {
+  recordBookmarkOpen(b.id);
+  if (b.type === "SNIPPET" && b.snippet) {
+    chrome.storage.local.set(
+      { ZP_HIGHLIGHT_REQUEST: { url: b.url, anchor: b.snippet, bookmarkId: b.id, timestamp: Date.now() } },
+      () => {
+        if (chrome.runtime.lastError) return;
+        chrome.tabs.create({ url: b.url });
+      },
+    );
+  } else {
+    window.open(b.url, "_blank");
+  }
+}
+
 function groupByUrl(bookmarks: Bookmark[]): PageGroup[] {
   const map = new Map<string, Bookmark[]>();
   for (const b of bookmarks) {
@@ -1396,11 +1412,11 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       e.preventDefault();
       setFocusedId(getAdjacentId(visibleIds, focusedId, e.key === "ArrowDown" ? 1 : -1));
     }
-    if (e.key === "Enter" && focusedId) {
+    if ((e.key === "Enter" || e.key === "ArrowRight") && focusedId) {
       const b = filtered.find((x) => x.id === focusedId);
       if (b) handleOpenBookmark(b);
     }
-    if ((e.key === "Delete" || e.key === "Backspace") && focusedId) {
+    if ((e.key === "Delete" || e.key === "Backspace" || e.key === "ArrowLeft") && focusedId) {
       e.preventDefault();
       onDeleteBookmark(focusedId);
     }
@@ -1509,6 +1525,27 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
     );
   }
 
+  const KeyHintBar = () =>
+    focusedId ? (
+      <div className="sticky bottom-0 mt-4 flex items-center justify-center gap-4 py-1.5 px-3 rounded-md bg-muted/70 backdrop-blur-sm text-[11px] text-muted-foreground select-none">
+        {(
+          [
+            ["↑↓", "navigate"],
+            ["→", "open"],
+            ["←", "delete"],
+            ["E", "rename"],
+          ] as [string, string][]
+        ).map(([k, d]) => (
+          <span key={k} className="flex items-center gap-1">
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] leading-tight">
+              {k}
+            </kbd>
+            <span>{d}</span>
+          </span>
+        ))}
+      </div>
+    ) : null;
+
   if (isSearching) {
     return (
       <div onKeyDown={handleKeyDown}>
@@ -1518,6 +1555,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
         <div className="space-y-2">
           {filtered.map((b) => renderBookmarkItem(b, folders[b.folderId]?.name))}
         </div>
+        <KeyHintBar />
       </div>
     );
   }
@@ -1553,18 +1591,190 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
           );
         })}
       </div>
+      <KeyHintBar />
     </div>
+  );
+}
+
+/* ─── CommandPalette ─────────────────────────────────────────────── */
+
+function CommandPalette({
+  open,
+  onOpenChange,
+  allBookmarks,
+  folders,
+  rootFolderId,
+  onNavigateToFolder,
+  onOpenBookmark,
+  onNewFolder,
+  onCheckDeadLinks,
+  onExport,
+  onOpenSettings,
+  onShowShortcuts,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  allBookmarks: Bookmark[];
+  folders: Record<string, Folder>;
+  rootFolderId: string;
+  onNavigateToFolder: (id: string) => void;
+  onOpenBookmark: (b: Bookmark) => void;
+  onNewFolder: () => void;
+  onCheckDeadLinks: () => void;
+  onExport: () => void;
+  onOpenSettings: () => void;
+  onShowShortcuts: () => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  const close = () => {
+    onOpenChange(false);
+    setQuery("");
+  };
+
+  const matchingBookmarks = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return allBookmarks
+      .filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.domain.toLowerCase().includes(q) ||
+          b.url.toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [query, allBookmarks]);
+
+  const matchingFolders = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return Object.values(folders)
+      .filter((f) => f.id !== rootFolderId && f.name.toLowerCase().includes(q))
+      .slice(0, 5);
+  }, [query, folders, rootFolderId]);
+
+  // Top-level folders for "Go to" suggestions when query is empty
+  const topFolders = useMemo(
+    () =>
+      Object.values(folders)
+        .filter((f) => f.id !== rootFolderId && f.parentId === rootFolderId)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 5),
+    [folders, rootFolderId],
+  );
+
+  return (
+    <CommandDialog open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
+      <CommandInput
+        value={query}
+        onValueChange={setQuery}
+        placeholder="Search bookmarks, folders, or an action…"
+      />
+      <CommandList>
+        <CommandEmpty>No results found.</CommandEmpty>
+
+        {/* Actions group — always rendered; cmdk filters when query is typed */}
+        <CommandGroup heading={query ? "Actions" : "Quick actions"}>
+          {!query &&
+            topFolders.map((f) => (
+              <CommandItem
+                key={f.id}
+                value={`go to folder ${f.name}`}
+                onSelect={() => { onNavigateToFolder(f.id); close(); }}
+              >
+                <FolderIcon size={14} />
+                <span>
+                  Go to <strong>{f.name}</strong>
+                </span>
+              </CommandItem>
+            ))}
+          <CommandItem value="new folder create" onSelect={() => { onNewFolder(); close(); }}>
+            <Plus size={14} />
+            <span>New folder</span>
+          </CommandItem>
+          <CommandItem
+            value="check dead links broken scan"
+            onSelect={() => { onCheckDeadLinks(); close(); }}
+          >
+            <Link2 size={14} />
+            <span>Check dead links</span>
+          </CommandItem>
+          <CommandItem
+            value="export library download json"
+            onSelect={() => { onExport(); close(); }}
+          >
+            <Download size={14} />
+            <span>Export library</span>
+          </CommandItem>
+          <CommandItem
+            value="settings preferences configure"
+            onSelect={() => { onOpenSettings(); close(); }}
+          >
+            <Settings size={14} />
+            <span>Settings</span>
+          </CommandItem>
+          <CommandItem
+            value="keyboard shortcuts help reference"
+            onSelect={() => { onShowShortcuts(); close(); }}
+          >
+            <HelpCircle size={14} />
+            <span>Keyboard shortcuts</span>
+            <CommandShortcut>?</CommandShortcut>
+          </CommandItem>
+        </CommandGroup>
+
+        {matchingBookmarks.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Bookmarks">
+              {matchingBookmarks.map((b) => (
+                <CommandItem
+                  key={b.id}
+                  value={`bookmark ${b.name} ${b.domain}`}
+                  onSelect={() => { onOpenBookmark(b); close(); }}
+                >
+                  <Link2 size={14} className="shrink-0 text-muted-foreground" />
+                  <span className="truncate flex-1">{b.name}</span>
+                  <CommandShortcut className="text-muted-foreground/60 text-[10px] normal-case tracking-normal">
+                    {b.domain}
+                  </CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {matchingFolders.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Folders">
+              {matchingFolders.map((f) => (
+                <CommandItem
+                  key={f.id}
+                  value={`folder ${f.name}`}
+                  onSelect={() => { onNavigateToFolder(f.id); close(); }}
+                >
+                  <FolderIcon size={14} className="shrink-0 text-muted-foreground" />
+                  <span>{f.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+      </CommandList>
+    </CommandDialog>
   );
 }
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
+function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings, onOpenCommandPalette }: {
   onExport: () => void;
   onImport: (file: File) => void;
   bulkMode: boolean;
   onToggleBulk: () => void;
   onOpenSettings: () => void;
+  onOpenCommandPalette: () => void;
 }) {
   const { preference, toggle } = useTheme();
 
@@ -1609,6 +1819,19 @@ function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: 
           </Button>
         </TooltipTrigger>
         <TooltipContent>{preference === "system" ? "System theme" : preference === "dark" ? "Dark mode" : "Light mode"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenCommandPalette}
+            className="h-9 px-2.5 gap-1.5 text-muted-foreground font-mono text-xs"
+          >
+            <span>⌘K</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Command palette (Ctrl+K)</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -1991,6 +2214,7 @@ export default function Library() {
   const [sidebarWidth, setSidebarWidth] = useState(276);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [tagsExpanded, setTagsExpanded] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -2060,11 +2284,17 @@ export default function Library() {
     setDashboardFilter,
   });
 
-  // Global ? shortcut — must be before early return; references hook objects directly
+  // Global keyboard shortcuts — must be before early return; references hook objects directly
   useEffect(() => {
     const anyDialogOpen = !!confirmDialog || settingsOpen || shortcutsOpen
       || folderOps.isFolderModalOpen || !!bookmarkOps.browserImportPreview;
     function onKey(e: KeyboardEvent) {
+      // Ctrl+K / ⌘K — command palette (works even when dialogs open, closes them)
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setCommandPaletteOpen((o) => !o);
+        return;
+      }
       if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
         setShortcutsOpen(true);
       }
@@ -2309,6 +2539,7 @@ export default function Library() {
                     setPrefsDraft(prefs);
                     setSettingsOpen(true);
                   }}
+                  onOpenCommandPalette={() => setCommandPaletteOpen(true)}
                 />
               </div>
             </div>
@@ -2647,6 +2878,45 @@ export default function Library() {
           </DialogContent>
         </Dialog>
 
+        {/* Command palette */}
+        <CommandPalette
+          open={commandPaletteOpen}
+          onOpenChange={setCommandPaletteOpen}
+          allBookmarks={allBookmarks}
+          folders={state.folders}
+          rootFolderId={state.rootFolderId}
+          onNavigateToFolder={(id) => {
+            setActiveFolderId(id);
+            setCommandPaletteOpen(false);
+          }}
+          onOpenBookmark={(b) => {
+            openBookmark(b);
+            setCommandPaletteOpen(false);
+          }}
+          onNewFolder={() => {
+            handleCreateFolder();
+            setCommandPaletteOpen(false);
+          }}
+          onCheckDeadLinks={() => {
+            void handleCheckDeadLinks();
+            setDashboardFilter("deadlinks");
+            setCommandPaletteOpen(false);
+          }}
+          onExport={() => {
+            handleExport();
+            setCommandPaletteOpen(false);
+          }}
+          onOpenSettings={() => {
+            setPrefsDraft(prefs);
+            setSettingsOpen(true);
+            setCommandPaletteOpen(false);
+          }}
+          onShowShortcuts={() => {
+            setShortcutsOpen(true);
+            setCommandPaletteOpen(false);
+          }}
+        />
+
         {/* Keyboard shortcuts cheat-sheet */}
         <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
           <DialogContent className="sm:max-w-xs">
@@ -2657,9 +2927,10 @@ export default function Library() {
             <div className="space-y-1.5 text-sm">
               {([
                 ["↑ / ↓", "Navigate bookmarks"],
-                ["Enter", "Open focused bookmark"],
+                ["→ / Enter", "Open focused bookmark"],
+                ["←  / Delete", "Delete focused bookmark"],
                 ["E", "Rename focused bookmark"],
-                ["Delete / Backspace", "Delete focused bookmark"],
+                ["Ctrl K", "Command palette"],
                 ["Esc", "Clear focus"],
                 ["?", "Show this panel"],
               ] as [string, string][]).map(([key, desc]) => (

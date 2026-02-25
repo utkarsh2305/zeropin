@@ -28,7 +28,8 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Inline rename for bookmarks and folders (no modal dialog)
 - Bulk select with bulk move, delete, and tag add/remove
 - Date range filter
-- Keyboard shortcuts: ↑ ↓ navigate · Enter open · E rename · Delete remove · ? shortcuts panel
+- Keyboard shortcuts: ↑ ↓ navigate · → open · ← delete · Enter open · E rename · Delete remove · ? shortcuts panel
+- Command palette — `Ctrl+K` / `⌘K` fuzzy-search across bookmarks, folders, and quick actions
 - Export/import library as JSON; import from browser bookmark HTML files (Chrome, Firefox, Safari, Edge)
 
 **Popup**
@@ -112,6 +113,14 @@ public/
 scripts/
   generate-icons.mjs    # PNG generation from SVG source
 ```
+
+## Future Roadmap
+
+Features under consideration for future releases:
+
+- **Annotations** — highlight specific passages within a saved snippet text using colour-coded ranges (yellow/green/pink/blue) with optional inline notes. Stored as character-offset ranges on the bookmark; rendered as coloured spans in the card.
+- **Research Sessions** — a lightweight second organisational layer. Start a named session from the popup; all subsequent saves are tagged to it. Sessions appear as a collapsible panel in the library and auto-close after a period of inactivity.
+- **Smart Collections** — saved filter presets that behave as dynamic folders. Define rules (tag = X AND domain = Y, isFavorite, date range); the collection shows a live matching count and filters the list when selected.
 
 ## Icon Generation
 

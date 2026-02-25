@@ -1,13 +1,8 @@
 import { useMemo } from "react";
 import type { LibraryState, Bookmark, Folder, TagDef } from "../../core/types";
 import type { Prefs } from "../../core/storage/prefs";
-import { AI_CHAT_DOMAINS } from "../../core/constants";
 
 // ── Local helpers ────────────────────────────────────────────────────────────
-
-function isAiDomain(domain: string): boolean {
-  return AI_CHAT_DOMAINS.has(domain);
-}
 
 function isDue(b: Bookmark): boolean {
   if (!b.reminderAt) return false;
@@ -18,11 +13,10 @@ function isDue(b: Bookmark): boolean {
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
-export type DashboardFilter = "unread" | "deadlinks" | "emptyfolders" | "favorites" | "notes";
+export type DashboardFilter = "deadlinks" | "favorites" | "notes";
 
 export interface FilterInputs {
   searchQuery: string;
-  sourceFilter: "all" | "web" | "ai_answer" | "ai_prompt";
   dateFrom: string;
   dateTo: string;
   activeTagFilters: string[];
@@ -33,7 +27,6 @@ export interface FilterPipelineResult {
   allBookmarks: Bookmark[];
   dueBookmarks: Bookmark[];
   filtered: Bookmark[];
-  unreadBookmarks: Bookmark[];
   deadLinkBookmarks: Bookmark[];
   favoriteBookmarks: Bookmark[];
   notesBookmarks: Bookmark[];
@@ -42,7 +35,7 @@ export interface FilterPipelineResult {
   sortedTagDefs: TagDef[];
   rootFolderCount: number;
   isSearching: boolean;
-  /** Tag IDs that appear on ≥1 bookmark in the current tag-filtered set. */
+  /** Tag IDs that appear on ≥1 bookmark in the current visible set. */
   availableTagIds: Set<string>;
 }
 
@@ -50,10 +43,10 @@ export interface FilterPipelineResult {
 
 export function useFilterPipeline(
   state: LibraryState,
-  prefs: Prefs,
+  _prefs: Prefs,
   inputs: FilterInputs,
 ): FilterPipelineResult {
-  const { searchQuery, sourceFilter, dateFrom, dateTo, activeTagFilters, dashboardFilter } = inputs;
+  const { searchQuery, dateFrom, dateTo, activeTagFilters, dashboardFilter } = inputs;
 
   const allBookmarks = useMemo(
     () => Object.values(state.bookmarks),
@@ -63,20 +56,6 @@ export function useFilterPipeline(
   const dueBookmarks = useMemo(
     () => allBookmarks.filter(isDue),
     [allBookmarks],
-  );
-
-  const unreadThresholdMs = (prefs.unreadThresholdDays ?? 60) * 86_400_000;
-  const unreadBookmarks = useMemo(
-    () =>
-      (prefs.unreadTrackingEnabled ?? false)
-        ? allBookmarks.filter(
-            (b) =>
-              (b.lastOpenedAt ?? 0) === 0 ||
-              Date.now() - (b.lastOpenedAt ?? 0) > unreadThresholdMs,
-          )
-        : [],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allBookmarks, prefs.unreadTrackingEnabled, unreadThresholdMs],
   );
 
   const deadLinkBookmarks = useMemo(
@@ -104,12 +83,10 @@ export function useFilterPipeline(
     [state.folders, state.rootFolderId, allBookmarks],
   );
 
+  // Always computed so the sidebar dot indicator is always visible
   const emptyFolderIds = useMemo(
-    () =>
-      dashboardFilter === "emptyfolders"
-        ? new Set(emptyFolderList.map((f) => f.id))
-        : new Set<string>(),
-    [dashboardFilter, emptyFolderList],
+    () => new Set(emptyFolderList.map((f) => f.id)),
+    [emptyFolderList],
   );
 
   const rootFolderCount = useMemo(
@@ -127,30 +104,10 @@ export function useFilterPipeline(
 
   // ── Filter pipeline ────────────────────────────────────────────────────────
 
-  const sourceFiltered = useMemo(
-    () =>
-      sourceFilter === "all"
-        ? allBookmarks
-        : allBookmarks.filter((b) => {
-            const cc = b.snippet?.chatContext;
-            const hasAiMeta = cc?.platform && cc.platform !== "unknown";
-            const domainIsAi = isAiDomain(b.domain);
-            if (sourceFilter === "web") return !hasAiMeta && !domainIsAi;
-            if (sourceFilter === "ai_answer")
-              return (
-                cc?.role === "assistant" ||
-                (domainIsAi && cc?.role !== "user")
-              );
-            if (sourceFilter === "ai_prompt") return cc?.role === "user";
-            return true;
-          }),
-    [allBookmarks, sourceFilter],
-  );
-
   const dateFiltered = useMemo(
     () =>
       dateFrom || dateTo
-        ? sourceFiltered.filter((b) => {
+        ? allBookmarks.filter((b) => {
             if (dateFrom) {
               const fromMs = new Date(dateFrom).setHours(0, 0, 0, 0);
               if (b.createdAt < fromMs) return false;
@@ -161,8 +118,8 @@ export function useFilterPipeline(
             }
             return true;
           })
-        : sourceFiltered,
-    [sourceFiltered, dateFrom, dateTo],
+        : allBookmarks,
+    [allBookmarks, dateFrom, dateTo],
   );
 
   // Intersection: bookmark must have ALL active tag filters
@@ -204,15 +161,13 @@ export function useFilterPipeline(
   }, [tagFiltered, searchQuery, isSearching, state.tagDefs]);
 
   const dashboardBase =
-    dashboardFilter === "unread"
-      ? unreadBookmarks
-      : dashboardFilter === "deadlinks"
-        ? deadLinkBookmarks
-        : dashboardFilter === "favorites"
-          ? favoriteBookmarks
-          : dashboardFilter === "notes"
-            ? notesBookmarks
-            : null;
+    dashboardFilter === "deadlinks"
+      ? deadLinkBookmarks
+      : dashboardFilter === "favorites"
+        ? favoriteBookmarks
+        : dashboardFilter === "notes"
+          ? notesBookmarks
+          : null;
 
   const filtered = useMemo(() => {
     if (dashboardBase === null) return searchFiltered;
@@ -237,7 +192,6 @@ export function useFilterPipeline(
   }, [dashboardBase, searchFiltered, activeTagFilters, isSearching, searchQuery]);
 
   // Tags that appear on ≥1 bookmark in the final visible set — drives sidebar narrowing.
-  // Derived from `filtered` so search, dashboard, and tag filters all contribute.
   const availableTagIds = useMemo(
     () => new Set(filtered.flatMap((b) => b.tags ?? [])),
     [filtered],
@@ -247,7 +201,6 @@ export function useFilterPipeline(
     allBookmarks,
     dueBookmarks,
     filtered,
-    unreadBookmarks,
     deadLinkBookmarks,
     favoriteBookmarks,
     notesBookmarks,

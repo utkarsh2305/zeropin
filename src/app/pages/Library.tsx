@@ -24,7 +24,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen, Heart, StickyNote } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Link2, Heart, StickyNote } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -120,71 +120,30 @@ const EMOJI_SEARCH_DATA: { e: string; k: string }[] = [
 /* ─── HealthDashboard ───────────────────────────────────────────── */
 
 function HealthDashboard({
-  unreadCount,
   deadCount,
-  emptyCount,
   favoritesCount,
   notesCount,
   deadLinkChecking,
   deadLinkProgress,
   deadLinkTotal,
   activeFilter,
-  unreadThreshold,
-  onUnreadClick,
   onDeadLinksClick,
-  onEmptyFoldersClick,
   onFavoritesClick,
   onNotesClick,
 }: {
-  unreadCount: number;
   deadCount: number;
-  emptyCount: number;
   favoritesCount: number;
   notesCount: number;
   deadLinkChecking: boolean;
   deadLinkProgress: number;
   deadLinkTotal: number;
   activeFilter: DashboardFilter | null;
-  unreadThreshold: number;
-  onUnreadClick: () => void;
   onDeadLinksClick: () => void;
-  onEmptyFoldersClick: () => void;
   onFavoritesClick: () => void;
   onNotesClick: () => void;
 }) {
-  const hasOtherChips = unreadCount > 0 || emptyCount > 0 || favoritesCount > 0 || notesCount > 0;
-  if (!hasOtherChips && !deadLinkChecking && deadCount === 0) {
-    // Dead links chip always shown — it's the trigger for the on-demand check
-    return (
-      <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
-        <button
-          onClick={onDeadLinksClick}
-          title="Click to check all saved links for 404s"
-          className="inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
-        >
-          <Link2 size={13} />
-          Check links
-        </button>
-      </div>
-    );
-  }
   return (
     <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
-      {unreadCount > 0 && (
-        <button
-          onClick={onUnreadClick}
-          title={`Bookmarks not opened in the last ${unreadThreshold} days`}
-          className={cn(
-            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
-            activeFilter === "unread"
-              ? "bg-primary/10 text-primary border-primary/30"
-              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-          )}
-        >
-          <Clock size={13} />
-          {unreadCount} unread
-        </button>
-      )}
       <button
         onClick={onDeadLinksClick}
         title={deadCount > 0 ? "URLs that returned 404 or are no longer accessible" : "Click to check all saved links for 404s"}
@@ -204,21 +163,6 @@ function HealthDashboard({
           ? `${deadCount} dead link${deadCount !== 1 ? "s" : ""}`
           : "Check links"}
       </button>
-      {emptyCount > 0 && (
-        <button
-          onClick={onEmptyFoldersClick}
-          title="Folders with no bookmarks — click to highlight them in the sidebar"
-          className={cn(
-            "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
-            activeFilter === "emptyfolders"
-              ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
-              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-          )}
-        >
-          <FolderOpen size={13} />
-          {emptyCount} empty folder{emptyCount !== 1 ? "s" : ""}
-        </button>
-      )}
       {favoritesCount > 0 && (
         <button
           onClick={onFavoritesClick}
@@ -430,9 +374,13 @@ function DroppableFolder({
                 className={cn("shrink-0", isActive ? "text-primary-foreground" : "text-muted-foreground")}
               />
             )}
-            <span className={cn("flex-1 truncate", isEmptyHighlighted && "text-amber-500 underline decoration-amber-500/60")}>
-              {folder.name}
-            </span>
+            <span className="flex-1 truncate">{folder.name}</span>
+            {isEmptyHighlighted && (
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-muted-foreground/35 shrink-0"
+                title="Empty folder"
+              />
+            )}
             {isRoot && rootFolderCount !== undefined && (
               <span className={cn("ml-1 text-xs", isActive ? "text-primary-foreground" : "text-foreground")}>
                 ({rootFolderCount})
@@ -1004,56 +952,6 @@ function SortableBookmarkItem({
   );
 }
 
-/* ─── RecentPins ───────────────────────────────────────────────── */
-
-function RecentPins({ bookmarks, onOpen }: { bookmarks: Bookmark[]; onOpen: (b: Bookmark) => void }) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  const recent = [...bookmarks]
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 5);
-
-  if (recent.length === 0) return null;
-
-  return (
-    <div className="mb-4">
-      <button
-        className="flex items-center gap-1.5 cursor-pointer mb-2 bg-transparent border-none p-0"
-        onClick={() => setCollapsed(!collapsed)}
-      >
-        <span className={cn("text-muted-foreground transition-transform duration-200", collapsed && "-rotate-90")}>
-          <ChevronDown size={12} />
-        </span>
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Recently Pinned</span>
-      </button>
-      {!collapsed && (
-        <div className="flex gap-2 py-1">
-          {recent.map((b) => (
-            <Tooltip key={b.id}>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => onOpen(b)}
-                  className="flex flex-1 min-w-0 items-center gap-1.5 px-3 py-1.5 bg-muted/50 border border-border/50 rounded-full cursor-pointer text-xs text-foreground shadow-sm hover:shadow-md hover:border-border transition-all overflow-hidden"
-                >
-                  <img
-                    src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
-                    alt=""
-                    width={14}
-                    height={14}
-                    className="rounded-sm shrink-0"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                  <span className="truncate min-w-0">{b.name}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>{b.name}</TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ─── Page grouping ────────────────────────────────────────────── */
 
@@ -1864,15 +1762,9 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 
 /* ─── Library (main component) ──────────────────────────────────── */
 
-// ── SourceFilter type ─────────────────────────────────────────────────────────
-
-type SourceFilter = "all" | "web" | "ai_answer" | "ai_prompt";
-
 // ── FilterBar ─────────────────────────────────────────────────────────────────
 
 type FilterBarProps = {
-  sourceFilter: SourceFilter;
-  onSourceFilterChange: (v: SourceFilter) => void;
   dateFrom: string;
   dateTo: string;
   onDateFromChange: (v: string) => void;
@@ -1882,23 +1774,11 @@ type FilterBarProps = {
 };
 
 function FilterBar({
-  sourceFilter, onSourceFilterChange,
   dateFrom, dateTo, onDateFromChange, onDateToChange,
   sortBy, onSortChange,
 }: FilterBarProps) {
   return (
     <div className="flex gap-2 items-center">
-      <Select value={sourceFilter} onValueChange={(v) => onSourceFilterChange(v as SourceFilter)}>
-        <SelectTrigger className="w-auto h-9 text-xs shrink-0">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All</SelectItem>
-          <SelectItem value="web">Web</SelectItem>
-          <SelectItem value="ai_answer">AI Answers</SelectItem>
-          <SelectItem value="ai_prompt">AI Prompts</SelectItem>
-        </SelectContent>
-      </Select>
       <Popover>
         <PopoverTrigger asChild>
           <Button
@@ -2104,7 +1984,6 @@ export default function Library() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFolderIds, setSearchFolderIds] = useState<string[]>([]);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [sortBy, setSortBy] = useState<SortKey>("newest");
@@ -2151,7 +2030,6 @@ export default function Library() {
 
   const pipeline = useFilterPipeline(_safeState, prefs, {
     searchQuery,
-    sourceFilter,
     dateFrom,
     dateTo,
     activeTagFilters,
@@ -2203,11 +2081,9 @@ export default function Library() {
     allBookmarks,
     dueBookmarks,
     filtered,
-    unreadBookmarks,
     deadLinkBookmarks,
     favoriteBookmarks,
     notesBookmarks,
-    emptyFolderList,
     emptyFolderIds,
     sortedTagDefs,
     rootFolderCount,
@@ -2254,7 +2130,6 @@ export default function Library() {
     handleBulkSetReminder,
     handleSaveReminderDirect,
     handleSetBookmarkNotes,
-    handleOpenBookmark,
     handleBrowserImportConfirm,
     handleExport,
     handleImport,
@@ -2399,19 +2274,14 @@ export default function Library() {
             {/* Row 2: health dashboard */}
             <div className="mt-2">
               <HealthDashboard
-                unreadCount={unreadBookmarks.length}
                 deadCount={deadLinkBookmarks.length}
-                emptyCount={emptyFolderList.length}
                 favoritesCount={favoriteBookmarks.length}
                 notesCount={notesBookmarks.length}
                 deadLinkChecking={deadLinkChecking}
                 deadLinkProgress={deadLinkProgress}
                 deadLinkTotal={deadLinkTotal}
                 activeFilter={dashboardFilter}
-                unreadThreshold={prefs.unreadThresholdDays ?? 60}
-                onUnreadClick={() => setDashboardFilter((f) => f === "unread" ? null : "unread")}
                 onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
-                onEmptyFoldersClick={() => setDashboardFilter((f) => f === "emptyfolders" ? null : "emptyfolders")}
                 onFavoritesClick={() => setDashboardFilter((f) => f === "favorites" ? null : "favorites")}
                 onNotesClick={() => setDashboardFilter((f) => f === "notes" ? null : "notes")}
               />
@@ -2419,8 +2289,6 @@ export default function Library() {
             {/* Row 3: filter controls + action buttons */}
             <div className="mt-2 flex items-center gap-2">
               <FilterBar
-                sourceFilter={sourceFilter}
-                onSourceFilterChange={setSourceFilter}
                 dateFrom={dateFrom}
                 dateTo={dateTo}
                 onDateFromChange={setDateFrom}
@@ -2527,14 +2395,11 @@ export default function Library() {
                   onToggleCollapse={() => setRemindersCollapsed((v) => !v)}
                 />
               )}
-              {!isSearching && <RecentPins bookmarks={allBookmarks} onOpen={handleOpenBookmark} />}
               {dashboardFilter && (
                 <div className="flex items-center gap-2 mb-2 px-1">
                   <span className="text-xs text-muted-foreground">Showing:</span>
                   <span className="flex items-center gap-1 text-xs bg-primary/10 text-primary rounded-full px-2 py-0.5">
-                    {dashboardFilter === "unread" && "Unread bookmarks"}
                     {dashboardFilter === "deadlinks" && "Dead links"}
-                    {dashboardFilter === "emptyfolders" && "Empty folders (highlighted in sidebar)"}
                     {dashboardFilter === "favorites" && "Favourite bookmarks"}
                     {dashboardFilter === "notes" && "Bookmarks with notes"}
                     <button onClick={() => setDashboardFilter(null)} className="ml-0.5 hover:text-primary/70">&times;</button>
@@ -2769,33 +2634,6 @@ export default function Library() {
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">When enabled, ZeroPin sends one daily OS notification if you have due reminders. The Reminders section in the library is always available regardless of this setting.</p>
-              </div>
-              <div className="space-y-2 border-t border-border pt-4">
-                <p className="text-sm font-medium">Library Health</p>
-                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={prefsDraft.unreadTrackingEnabled ?? false}
-                    onChange={(e) => setPrefsDraft((d) => ({ ...d, unreadTrackingEnabled: e.target.checked }))}
-                    className="cursor-pointer"
-                  />
-                  Track unread bookmarks
-                </label>
-                <p className="text-xs text-muted-foreground">Shows bookmarks not opened via ZeroPin in the health dashboard. Starts tracking from today — bookmarks saved before enabling this will initially appear as unread.</p>
-                {(prefsDraft.unreadTrackingEnabled ?? false) && (
-                  <div className="flex items-center gap-2 text-sm pl-5">
-                    <span className="text-muted-foreground">Mark unread after</span>
-                    <input
-                      type="number"
-                      min={7}
-                      max={365}
-                      value={prefsDraft.unreadThresholdDays ?? 60}
-                      onChange={(e) => setPrefsDraft((d) => ({ ...d, unreadThresholdDays: Math.max(7, Math.min(365, Number(e.target.value))) }))}
-                      className="w-16 border border-border rounded px-1.5 py-0.5 bg-background text-foreground text-center"
-                    />
-                    <span className="text-muted-foreground">days</span>
-                  </div>
-                )}
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-2">

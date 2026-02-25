@@ -18,7 +18,7 @@ function isDue(b: Bookmark): boolean {
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
-export type DashboardFilter = "unread" | "deadlinks" | "emptyfolders";
+export type DashboardFilter = "unread" | "deadlinks" | "emptyfolders" | "favorites" | "notes";
 
 export interface FilterInputs {
   searchQuery: string;
@@ -35,6 +35,8 @@ export interface FilterPipelineResult {
   filtered: Bookmark[];
   unreadBookmarks: Bookmark[];
   deadLinkBookmarks: Bookmark[];
+  favoriteBookmarks: Bookmark[];
+  notesBookmarks: Bookmark[];
   emptyFolderList: Folder[];
   emptyFolderIds: Set<string>;
   sortedTagDefs: TagDef[];
@@ -77,6 +79,16 @@ export function useFilterPipeline(
 
   const deadLinkBookmarks = useMemo(
     () => allBookmarks.filter((b) => b.isDeadLink === true),
+    [allBookmarks],
+  );
+
+  const favoriteBookmarks = useMemo(
+    () => allBookmarks.filter((b) => !!b.isFavorite),
+    [allBookmarks],
+  );
+
+  const notesBookmarks = useMemo(
+    () => allBookmarks.filter((b) => !!b.notes?.trim()),
     [allBookmarks],
   );
 
@@ -165,24 +177,39 @@ export function useFilterPipeline(
 
   const searchFiltered = useMemo(() => {
     if (!isSearching) return tagFiltered;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.trim();
+    // #tag syntax: match bookmarks whose tags include any tag whose name contains the query
+    if (q.startsWith("#")) {
+      const tagName = q.slice(1).toLowerCase();
+      if (!tagName) return tagFiltered;
+      const matchingIds = Object.values(state.tagDefs ?? {})
+        .filter((t) => t.name.toLowerCase().includes(tagName))
+        .map((t) => t.id);
+      if (matchingIds.length === 0) return [];
+      return tagFiltered.filter((b) => (b.tags ?? []).some((tid) => matchingIds.includes(tid)));
+    }
+    const lower = q.toLowerCase();
     return tagFiltered.filter(
       (b) =>
-        b.name.toLowerCase().includes(q) ||
-        b.url.toLowerCase().includes(q) ||
-        b.domain.toLowerCase().includes(q) ||
-        (b.snippet?.text ?? "").toLowerCase().includes(q) ||
-        (b.notes ?? "").toLowerCase().includes(q),
+        b.name.toLowerCase().includes(lower) ||
+        b.url.toLowerCase().includes(lower) ||
+        b.domain.toLowerCase().includes(lower) ||
+        (b.snippet?.text ?? "").toLowerCase().includes(lower) ||
+        (b.notes ?? "").toLowerCase().includes(lower),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tagFiltered, searchQuery, isSearching]);
+  }, [tagFiltered, searchQuery, isSearching, state.tagDefs]);
 
   const dashboardBase =
     dashboardFilter === "unread"
       ? unreadBookmarks
       : dashboardFilter === "deadlinks"
         ? deadLinkBookmarks
-        : null;
+        : dashboardFilter === "favorites"
+          ? favoriteBookmarks
+          : dashboardFilter === "notes"
+            ? notesBookmarks
+            : null;
 
   const filtered = useMemo(() => {
     if (dashboardBase === null) return searchFiltered;
@@ -205,6 +232,8 @@ export function useFilterPipeline(
     filtered,
     unreadBookmarks,
     deadLinkBookmarks,
+    favoriteBookmarks,
+    notesBookmarks,
     emptyFolderList,
     emptyFolderIds,
     sortedTagDefs,

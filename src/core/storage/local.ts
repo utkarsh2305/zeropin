@@ -343,6 +343,15 @@ export async function setBookmarkNotes(bookmarkId: string, notes: string): Promi
   await setState(state);
 }
 
+export async function toggleFavorite(bookmarkId: string): Promise<void> {
+  const state = await getState();
+  const b = state.bookmarks[bookmarkId];
+  if (!b) throw new Error(`Bookmark ${bookmarkId} not found`);
+  b.isFavorite = b.isFavorite ? undefined : true;
+  b.updatedAt = now();
+  await setState(state);
+}
+
 export async function deleteBookmark(bookmarkId: string): Promise<void> {
   const state = await getState();
   if (!state.bookmarks[bookmarkId]) throw new Error(`Bookmark ${bookmarkId} not found`);

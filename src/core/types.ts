@@ -61,6 +61,8 @@ export interface Bookmark {
   reminderSnoozedUntil?: number;
   /** True if the URL returned 404/410 on the last dead-link check. Absent = not checked or working. */
   isDeadLink?: boolean;
+  /** True if the user has marked this bookmark as a favourite. Absent = not a favourite. */
+  isFavorite?: boolean;
   /** Unix ms timestamp of the last dead-link check run. */
   deadLinkCheckedAt?: number;
 

@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, FolderPlus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Settings, Bell, FolderSearch, CalendarDays, Clock, Link2, FolderOpen, Heart, StickyNote } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -83,6 +83,8 @@ function HealthDashboard({
   unreadCount,
   deadCount,
   emptyCount,
+  favoritesCount,
+  notesCount,
   deadLinkChecking,
   deadLinkProgress,
   deadLinkTotal,
@@ -91,10 +93,14 @@ function HealthDashboard({
   onUnreadClick,
   onDeadLinksClick,
   onEmptyFoldersClick,
+  onFavoritesClick,
+  onNotesClick,
 }: {
   unreadCount: number;
   deadCount: number;
   emptyCount: number;
+  favoritesCount: number;
+  notesCount: number;
   deadLinkChecking: boolean;
   deadLinkProgress: number;
   deadLinkTotal: number;
@@ -103,8 +109,10 @@ function HealthDashboard({
   onUnreadClick: () => void;
   onDeadLinksClick: () => void;
   onEmptyFoldersClick: () => void;
+  onFavoritesClick: () => void;
+  onNotesClick: () => void;
 }) {
-  const hasOtherChips = unreadCount > 0 || emptyCount > 0;
+  const hasOtherChips = unreadCount > 0 || emptyCount > 0 || favoritesCount > 0 || notesCount > 0;
   if (!hasOtherChips && !deadLinkChecking && deadCount === 0) {
     // Dead links chip always shown — it's the trigger for the on-demand check
     return (
@@ -169,6 +177,36 @@ function HealthDashboard({
         >
           <FolderOpen size={11} />
           {emptyCount} empty folder{emptyCount !== 1 ? "s" : ""}
+        </button>
+      )}
+      {favoritesCount > 0 && (
+        <button
+          onClick={onFavoritesClick}
+          title="Bookmarks marked as favourite"
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            activeFilter === "favorites"
+              ? "bg-rose-500/10 text-rose-500 border-rose-500/30"
+              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+          )}
+        >
+          <Heart size={11} />
+          {favoritesCount} favourite{favoritesCount !== 1 ? "s" : ""}
+        </button>
+      )}
+      {notesCount > 0 && (
+        <button
+          onClick={onNotesClick}
+          title="Bookmarks with saved notes"
+          className={cn(
+            "inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors",
+            activeFilter === "notes"
+              ? "bg-primary/10 text-primary border-primary/30"
+              : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+          )}
+        >
+          <StickyNote size={11} />
+          {notesCount} with notes
         </button>
       )}
     </div>
@@ -313,7 +351,7 @@ function DroppableFolder({
           <FolderIcon
             size={14}
             className={cn("shrink-0", isActive ? "text-primary-foreground" : !colorHex ? "text-muted-foreground" : undefined)}
-            style={!isActive && colorHex ? { color: colorHex } : undefined}
+            style={!isActive && colorHex ? { color: colorHex, fill: colorHex + "4D" } : undefined}
           />
           <span className={cn(isEmptyHighlighted && "text-amber-500 underline decoration-amber-500/60")}>
             {folder.name}
@@ -395,7 +433,18 @@ type FolderTreeProps = {
 };
 
 function FolderTree({ state, activeFolderId, isDark, onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename, emptyFolderIds, rootFolderCount }: FolderTreeProps) {
-  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
+    // Collapse everything except root (so main folders are visible, subfolders hidden)
+    const all = new Set(Object.keys(state.folders));
+    all.delete(state.rootFolderId);
+    // Un-collapse ancestors of the active folder so it stays visible in the tree
+    const reveal = (id: string) => {
+      const f = state.folders[id];
+      if (f?.parentId) { all.delete(f.parentId); reveal(f.parentId); }
+    };
+    reveal(activeFolderId);
+    return all;
+  });
 
   const toggleFolder = (folderId: string) => {
     setCollapsedFolders((prev) => {
@@ -469,6 +518,7 @@ function SortableBookmarkItem({
   isDark,
   onToggleTags,
   onSaveReminder,
+  onToggleFavorite,
 }: {
   bookmark: Bookmark;
   onOpen: () => void;
@@ -489,6 +539,7 @@ function SortableBookmarkItem({
   isDark?: boolean;
   onToggleTags?: () => void;
   onSaveReminder?: (reminderAt: number | null) => void;
+  onToggleFavorite?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLSpanElement>(null);
@@ -497,6 +548,7 @@ function SortableBookmarkItem({
   const [closestEdge, setClosestEdge] = useState<Edge | null>(null);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [reminderDateDraft, setReminderDateDraft] = useState("");
+  const [reminderTimeDraft, setReminderTimeDraft] = useState("09:00");
 
   useEffect(() => {
     const el = ref.current;
@@ -539,6 +591,7 @@ function SortableBookmarkItem({
       ref={ref}
       tabIndex={0}
       onFocus={onFocusCard}
+      data-bookmark-id={bookmark.id}
       className={cn(
         "group/card relative rounded-lg border p-3 transition-all outline-none",
         isSnippet ? "border-l-2 border-l-snippet" : "border-border/50",
@@ -673,8 +726,32 @@ function SortableBookmarkItem({
           )}
         </div>
 
+        {onToggleFavorite && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleFavorite}
+            className={cn(
+              "h-7 w-7 shrink-0 transition-opacity",
+              bookmark.isFavorite
+                ? "text-rose-500"
+                : "opacity-0 group-hover/card:opacity-100 text-muted-foreground"
+            )}
+            title={bookmark.isFavorite ? "Remove from favourites" : "Add to favourites"}
+          >
+            <Heart size={14} fill={bookmark.isFavorite ? "currentColor" : "none"} />
+          </Button>
+        )}
         {onSaveReminder && (
-          <Popover open={reminderOpen} onOpenChange={(o) => { setReminderOpen(o); if (!o) setReminderDateDraft(""); }}>
+          <Popover open={reminderOpen} onOpenChange={(o) => {
+            if (o && bookmark.reminderAt) {
+              const d = new Date(bookmark.reminderAt);
+              setReminderDateDraft(d.toISOString().slice(0, 10));
+              setReminderTimeDraft(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+            }
+            if (!o) { setReminderDateDraft(""); setReminderTimeDraft("09:00"); }
+            setReminderOpen(o);
+          }}>
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
@@ -695,7 +772,7 @@ function SortableBookmarkItem({
               {bookmark.reminderAt && (
                 <div className="flex items-center justify-between rounded bg-amber-500/10 border border-amber-500/20 px-2 py-1 mb-2">
                   <span className="text-xs text-amber-700 dark:text-amber-400">
-                    Due {new Date(bookmark.reminderAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                    Due {new Date(bookmark.reminderAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                   </span>
                   <button
                     onClick={() => { onSaveReminder(null); setReminderOpen(false); }}
@@ -711,8 +788,10 @@ function SortableBookmarkItem({
                   <button
                     key={days}
                     onClick={() => {
-                      const ms = Date.now() + days * 86400000;
-                      onSaveReminder(ms);
+                      const d = new Date();
+                      d.setDate(d.getDate() + days);
+                      d.setHours(9, 0, 0, 0);
+                      onSaveReminder(d.getTime());
                       setReminderOpen(false);
                     }}
                     className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors"
@@ -726,6 +805,12 @@ function SortableBookmarkItem({
                 value={reminderDateDraft}
                 min={new Date().toISOString().slice(0, 10)}
                 onChange={(e) => setReminderDateDraft(e.target.value)}
+                className="w-full border border-border rounded px-2 py-1 text-xs bg-background text-foreground mb-1"
+              />
+              <input
+                type="time"
+                value={reminderTimeDraft}
+                onChange={(e) => setReminderTimeDraft(e.target.value)}
                 className="w-full border border-border rounded px-2 py-1 text-xs bg-background text-foreground mb-2"
               />
               <Button
@@ -733,11 +818,11 @@ function SortableBookmarkItem({
                 className="w-full"
                 disabled={!reminderDateDraft}
                 onClick={() => {
-                  const ms = new Date(reminderDateDraft).getTime();
-                  if (!isNaN(ms)) { onSaveReminder(ms); setReminderOpen(false); setReminderDateDraft(""); }
+                  const ms = new Date(`${reminderDateDraft}T${reminderTimeDraft || "09:00"}`).getTime();
+                  if (!isNaN(ms)) { onSaveReminder(ms); setReminderOpen(false); setReminderDateDraft(""); setReminderTimeDraft("09:00"); }
                 }}
               >
-                Set date
+                Set reminder
               </Button>
             </PopoverContent>
           </Popover>
@@ -927,9 +1012,10 @@ function reminderLabel(reminderAt: number): string {
   const diff = reminderAt - Date.now();
   if (diff <= 0) return "Due now";
   const days = Math.floor(diff / 86400000);
-  if (days === 0) return "Due today";
-  if (days === 1) return "Due tomorrow";
-  return `Due in ${days}d`;
+  const time = new Date(reminderAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return `Due today ${time}`;
+  if (days === 1) return `Due tomorrow ${time}`;
+  return `Due in ${days}d ${time}`;
 }
 
 /* ─── RemindersSection ──────────────────────────────────────────── */
@@ -1220,13 +1306,20 @@ type BookmarkListProps = {
   onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
   isDark?: boolean;
   onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
+  onToggleFavorite?: (id: string) => void;
   searchScopedToFolder?: boolean;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, searchScopedToFolder }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, onRequestRename, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchScopedToFolder }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!focusedId) return;
+    document.querySelector<HTMLElement>(`[data-bookmark-id="${focusedId}"]`)
+      ?.focus({ preventScroll: false });
+  }, [focusedId]);
 
   const activeIds = (isSearching && !searchScopedToFolder)
     ? null
@@ -1330,6 +1423,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
         isDark={isDark}
         onToggleTags={() => setExpandedTags((prev) => ({ ...prev, [b.id]: !prev[b.id] }))}
         onSaveReminder={onSaveReminder ? (reminderAt) => onSaveReminder(b.id, reminderAt) : undefined}
+        onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(b.id) : undefined}
       />
       {expandedTags[b.id] && (
         <TagEditor
@@ -1408,8 +1502,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
-  onCreateFolder: () => void;
+function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings }: {
   onExport: () => void;
   onImport: (file: File) => void;
   bulkMode: boolean;
@@ -1433,10 +1526,6 @@ function TopBar({ onCreateFolder, onExport, onImport, bulkMode, onToggleBulk, on
         </TooltipTrigger>
         <TooltipContent>{bulkMode ? "Cancel selection" : "Select items"}</TooltipContent>
       </Tooltip>
-      <Button onClick={onCreateFolder} size="sm" className="h-9">
-        <FolderPlus size={14} />
-        Folder
-      </Button>
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="outline" size="icon" onClick={onExport} className="h-9 w-9">
@@ -1721,6 +1810,7 @@ type FolderSidebarPanelProps = {
   emptyFolderIds: Set<string>;
   rootFolderCount: number;
   onDeleteTag: (id: string) => void;
+  onCreateFolder: () => void;
   onSelectFolder: (id: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => void;
@@ -1731,12 +1821,25 @@ type FolderSidebarPanelProps = {
 function FolderSidebarPanel({
   state, activeFolderId, isDark, tagsExpanded, onToggleTags,
   activeTagFilter, onTagFilterChange, allBookmarks, sortedTagDefs,
-  emptyFolderIds, rootFolderCount, onDeleteTag,
+  emptyFolderIds, rootFolderCount, onDeleteTag, onCreateFolder,
   onSelectFolder, onRenameFolder, onDeleteFolder, onColorChange, onRequestRename,
 }: FolderSidebarPanelProps) {
   return (
     <>
-      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2.5">Folders</div>
+      <div className="flex items-center justify-between mb-2.5">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Folders</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onCreateFolder}
+              className="p-1 rounded hover:bg-accent/60 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Plus size={16} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>New folder</TooltipContent>
+        </Tooltip>
+      </div>
       <FolderTree
         state={state}
         activeFolderId={activeFolderId}
@@ -1930,6 +2033,8 @@ export default function Library() {
     filtered,
     unreadBookmarks,
     deadLinkBookmarks,
+    favoriteBookmarks,
+    notesBookmarks,
     emptyFolderList,
     emptyFolderIds,
     sortedTagDefs,
@@ -1980,6 +2085,7 @@ export default function Library() {
     handleBrowserImportConfirm,
     handleExport,
     handleImport,
+    handleToggleFavorite,
   } = bookmarkOps;
 
   /* ─── Handlers ─────────────────────────────────────────────── */
@@ -2042,6 +2148,8 @@ export default function Library() {
                 unreadCount={unreadBookmarks.length}
                 deadCount={deadLinkBookmarks.length}
                 emptyCount={emptyFolderList.length}
+                favoritesCount={favoriteBookmarks.length}
+                notesCount={notesBookmarks.length}
                 deadLinkChecking={deadLinkChecking}
                 deadLinkProgress={deadLinkProgress}
                 deadLinkTotal={deadLinkTotal}
@@ -2050,6 +2158,8 @@ export default function Library() {
                 onUnreadClick={() => setDashboardFilter((f) => f === "unread" ? null : "unread")}
                 onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
                 onEmptyFoldersClick={() => setDashboardFilter((f) => f === "emptyfolders" ? null : "emptyfolders")}
+                onFavoritesClick={() => setDashboardFilter((f) => f === "favorites" ? null : "favorites")}
+                onNotesClick={() => setDashboardFilter((f) => f === "notes" ? null : "notes")}
               />
             </div>
             {/* Row 3: filter controls + action buttons */}
@@ -2068,7 +2178,6 @@ export default function Library() {
               />
               <div className="ml-auto pl-2 border-l border-border">
                 <TopBar
-                  onCreateFolder={handleCreateFolder}
                   onExport={handleExport}
                   onImport={handleImport}
                   bulkMode={bulkMode}
@@ -2138,6 +2247,7 @@ export default function Library() {
                 emptyFolderIds={emptyFolderIds}
                 rootFolderCount={rootFolderCount}
                 onDeleteTag={handleDeleteTag}
+                onCreateFolder={handleCreateFolder}
                 onSelectFolder={handleSelectFolder}
                 onRenameFolder={handleRenameFolder}
                 onDeleteFolder={handleDeleteFolder}
@@ -2171,6 +2281,8 @@ export default function Library() {
                     {dashboardFilter === "unread" && "Unread bookmarks"}
                     {dashboardFilter === "deadlinks" && "Dead links"}
                     {dashboardFilter === "emptyfolders" && "Empty folders (highlighted in sidebar)"}
+                    {dashboardFilter === "favorites" && "Favourite bookmarks"}
+                    {dashboardFilter === "notes" && "Bookmarks with notes"}
                     <button onClick={() => setDashboardFilter(null)} className="ml-0.5 hover:text-primary/70">&times;</button>
                   </span>
                 </div>
@@ -2212,6 +2324,7 @@ export default function Library() {
                 onSetBookmarkTags={handleSetBookmarkTags}
                 isDark={isDark}
                 onSaveReminder={handleSaveReminderDirect}
+                onToggleFavorite={handleToggleFavorite}
                 searchScopedToFolder={searchWithinFolder}
               />
             </div>

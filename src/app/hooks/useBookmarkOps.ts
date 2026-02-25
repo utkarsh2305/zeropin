@@ -17,6 +17,7 @@ import {
   updateDeadLinkResults,
   exportState,
   importState,
+  toggleFavorite,
 } from "../../core/storage/local";
 import { setPendingSave, updateRecents } from "../../core/storage/recents";
 import type { PendingSave } from "../../core/storage/recents";
@@ -86,6 +87,7 @@ export interface BookmarkOpsResult {
   handleBrowserImportConfirm: () => Promise<void>;
   handleExport: () => Promise<void>;
   handleImport: (file: File) => Promise<void>;
+  handleToggleFavorite: (id: string) => Promise<void>;
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
@@ -483,6 +485,11 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     }
   };
 
+  const handleToggleFavorite = async (id: string) => {
+    await toggleFavorite(id);
+    await refreshState();
+  };
+
   return {
     expandedNotes,
     setExpandedNotes,
@@ -515,5 +522,6 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     handleBrowserImportConfirm,
     handleExport,
     handleImport,
+    handleToggleFavorite,
   };
 }

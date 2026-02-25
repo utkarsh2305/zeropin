@@ -6,8 +6,6 @@ import {
   reorderBookmarks,
   moveFolderToParent,
   setBookmarkNotes,
-  bulkDeleteBookmarks,
-  bulkMoveBookmarks,
   bulkSetBookmarkReminder,
   recordBookmarkOpen,
   addPageBookmark,

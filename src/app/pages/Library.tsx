@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from "react";
-import { setPrefs, type Prefs } from "../../core/storage/prefs";
-import { createTag, deleteTag, recordBookmarkOpen } from "../../core/storage/local";
+import { setPrefs } from "../../core/storage/prefs";
+import { createTag, deleteTag, recordBookmarkOpen, bulkDeleteBookmarks, bulkMoveBookmarks } from "../../core/storage/local";
+import { suggestTagIds } from "../../core/aiTags";
+import { AI_CHAT_DOMAINS } from "../../core/constants";
 import { useLibraryState } from "../hooks/useLibraryState";
-import { useFolderOps, notifyFoldersChanged } from "../hooks/useFolderOps";
+import { useFolderOps } from "../hooks/useFolderOps";
 import type { ConfirmDialogState } from "../hooks/useFolderOps";
 import { useBookmarkOps } from "../hooks/useBookmarkOps";
 import { browserSourceLabel, BOOKMARK_CAP } from "../../core/storage/importBrowser";
@@ -29,6 +31,10 @@ import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
+
+function isAiDomain(domain: string): boolean {
+  return AI_CHAT_DOMAINS.has(domain);
+}
 
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
@@ -1801,7 +1807,6 @@ export default function Library() {
   const { isDark } = useTheme();
   const {
     state,
-    setState,
     refreshState,
     activeFolderId,
     setActiveFolderId,
@@ -1839,18 +1844,6 @@ export default function Library() {
 
   const [remindersCollapsed, setRemindersCollapsed] = useState(false);
   const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter | null>(null);
-
-  // Global ? shortcut for shortcuts cheat-sheet
-  useEffect(() => {
-    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen || isFolderModalOpen || !!browserImportPreview;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
-        setShortcutsOpen(true);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, isFolderModalOpen, browserImportPreview]);
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -1963,7 +1956,6 @@ export default function Library() {
     deadLinkModalResult,
     handleDeleteBookmark,
     handleCheckDeadLinks,
-    handlePickerSave,
     handleRenameBookmark,
     handleSetBookmarkTags,
     handleDismissReminder,
@@ -1972,11 +1964,22 @@ export default function Library() {
     handleSaveReminderDirect,
     handleSetBookmarkNotes,
     handleOpenBookmark,
-    handleBrowserFileSelected,
     handleBrowserImportConfirm,
     handleExport,
     handleImport,
   } = bookmarkOps;
+
+  // Global ? shortcut for shortcuts cheat-sheet (after hooks so isFolderModalOpen / browserImportPreview are in scope)
+  useEffect(() => {
+    const anyDialogOpen = !!confirmDialog || !!renameDialog || settingsOpen || shortcutsOpen || isFolderModalOpen || !!browserImportPreview;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "?" && !anyDialogOpen && (e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "TEXTAREA") {
+        setShortcutsOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmDialog, renameDialog, settingsOpen, shortcutsOpen, isFolderModalOpen, browserImportPreview]);
 
   /* ─── Handlers ─────────────────────────────────────────────── */
 

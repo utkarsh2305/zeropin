@@ -73,7 +73,6 @@ export interface BookmarkOpsResult {
   setShowDeadLinkModal: React.Dispatch<React.SetStateAction<boolean>>;
   deadLinkModalResult: { dead: number; total: number } | null;
   handleDeleteBookmark: (id: string) => void;
-  handleDeleteBookmarkDirect: (id: string) => Promise<void>;
   handleCheckDeadLinks: () => Promise<void>;
   handlePickerSave: (folderId: string) => Promise<void>;
   handleRenameBookmark: (id: string, name: string) => Promise<void>;
@@ -219,11 +218,6 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     });
   };
 
-  const handleDeleteBookmarkDirect = async (id: string): Promise<void> => {
-    await deleteBookmark(id);
-    chrome.runtime.sendMessage({ type: "ZP_REMINDERS_CHANGED" });
-    await refreshState();
-  };
 
   const handlePickerSave = async (folderId: string) => {
     if (!pendingSave) return;
@@ -557,7 +551,6 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     setShowDeadLinkModal,
     deadLinkModalResult,
     handleDeleteBookmark,
-    handleDeleteBookmarkDirect,
     handleCheckDeadLinks,
     handlePickerSave,
     handleRenameBookmark,

@@ -1367,10 +1367,11 @@ type BookmarkListProps = {
   isDark?: boolean;
   onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
   onToggleFavorite?: (id: string) => void;
+  onDeleteBookmarkDirect?: (id: string) => Promise<void>;
   searchFolderIds?: string[];
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [] }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, onDeleteBookmarkDirect, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [] }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
@@ -1416,9 +1417,17 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
       const b = filtered.find((x) => x.id === focusedId);
       if (b) handleOpenBookmark(b);
     }
-    if ((e.key === "Delete" || e.key === "Backspace" || e.key === "ArrowLeft") && focusedId) {
+    if ((e.key === "Delete" || e.key === "Backspace") && focusedId) {
       e.preventDefault();
       onDeleteBookmark(focusedId);
+    }
+    if (e.key === "ArrowLeft" && focusedId && onDeleteBookmarkDirect) {
+      e.preventDefault();
+      // Advance focus to next item before deleting so navigation continues uninterrupted
+      const nextId = getAdjacentId(visibleIds, focusedId, 1) ?? getAdjacentId(visibleIds, focusedId, -1);
+      const idToDelete = focusedId;
+      setFocusedId(nextId === idToDelete ? null : nextId);
+      void onDeleteBookmarkDirect(idToDelete);
     }
     if ((e.key === "e" || e.key === "E") && focusedId) {
       setRenamingId(focusedId);
@@ -2352,6 +2361,7 @@ export default function Library() {
     setShowDeadLinkModal,
     deadLinkModalResult,
     handleDeleteBookmark,
+    handleDeleteBookmarkDirect,
     handleCheckDeadLinks,
     handleRenameBookmark,
     handleSetBookmarkTags,
@@ -2670,6 +2680,7 @@ export default function Library() {
                 folders={state.folders}
                 onRenameBookmark={handleRenameBookmark}
                 onDeleteBookmark={handleDeleteBookmark}
+                onDeleteBookmarkDirect={handleDeleteBookmarkDirect}
                 expandedNotes={expandedNotes}
                 onSetExpandedNotes={setExpandedNotes}
                 onSetNotes={handleSetBookmarkNotes}

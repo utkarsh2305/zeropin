@@ -231,6 +231,18 @@ describe("parseBrowserHtml", () => {
     const { bookmarks } = parseBrowserHtml(html);
     expect(bookmarks[0].folderTempId).toBeNull();
   });
+
+  it("strips <script> tags and still returns bookmarks", () => {
+    const html = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<DL><p>
+  <DT><A HREF="https://example.com">Example</A>
+</DL>
+<script src="https://www.gov.uk/rum-custom-data.js"></script>
+<script>alert(1)</script>`;
+    const { bookmarks } = parseBrowserHtml(html);
+    expect(bookmarks).toHaveLength(1);
+    expect(bookmarks[0].url).toBe("https://example.com");
+  });
 });
 
 // ── buildImportPreview ──

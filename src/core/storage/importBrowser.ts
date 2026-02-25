@@ -105,8 +105,11 @@ function walkDl(
 
 export function parseBrowserHtml(html: string): { folders: ParsedFolder[]; bookmarks: ParsedBookmark[] } {
   try {
+    // Strip <script> blocks before parsing so Chrome does not attempt to load
+    // external scripts and log CSP violations in the extension error panel.
+    const sanitized = html.replace(/<script\b[\s\S]*?<\/script>/gi, "");
     const parser = new DOMParser();
-    const doc = parser.parseFromString(html, "text/html");
+    const doc = parser.parseFromString(sanitized, "text/html");
     const folders: ParsedFolder[] = [];
     const bookmarks: ParsedBookmark[] = [];
     const rootDl = doc.querySelector("dl");

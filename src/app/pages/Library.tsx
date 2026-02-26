@@ -24,8 +24,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut } from "@/components/ui/command";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Link2, Heart, StickyNote } from "lucide-react";
+import { Command, CommandInput, CommandList, CommandGroup, CommandItem, CommandSeparator, CommandShortcut } from "@/components/ui/command";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Link2, Heart, StickyNote, Globe, BookmarkX } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -310,7 +310,7 @@ function DroppableFolder({
           >
             {!isRoot && <span className="w-3.5 shrink-0" />}
             {folder.icon ? (
-              <span className="shrink-0 w-[18px] h-[18px] rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
+              <span className="shrink-0 w-4.5 h-4.5 rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
                 {folder.icon}
               </span>
             ) : (
@@ -366,7 +366,7 @@ function DroppableFolder({
               <span className="w-3.5 shrink-0" />
             ) : null}
             {folder.icon ? (
-              <span className="shrink-0 w-[18px] h-[18px] rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
+              <span className="shrink-0 w-4.5 h-4.5 rounded flex items-center justify-center text-[13px] leading-none bg-muted/80">
                 {folder.icon}
               </span>
             ) : (
@@ -408,7 +408,7 @@ function DroppableFolder({
                   {folder.icon
                     ? <span className="shrink-0 w-7 h-7 rounded flex items-center justify-center text-lg leading-none bg-muted/80">{folder.icon}</span>
                     : <FolderIcon size={18} className="shrink-0 text-muted-foreground" />}
-                  <span className="text-sm font-medium truncate max-w-[160px]">{folder.name}</span>
+                  <span className="text-sm font-medium truncate max-w-40">{folder.name}</span>
                   {folder.icon && (
                     <button onClick={() => onIconChange(undefined)} className="ml-auto p-0.5 rounded text-muted-foreground hover:text-foreground transition-colors" title="Remove icon">
                       <X size={13} />
@@ -424,7 +424,7 @@ function DroppableFolder({
                   className="w-full mb-2.5 px-2.5 py-1.5 text-sm border border-border rounded bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50"
                 />
                 {/* Emoji grid */}
-                <div className="grid grid-cols-8 gap-1 max-h-[210px] overflow-y-auto">
+                <div className="grid grid-cols-8 gap-1 max-h-52.5 overflow-y-auto">
                   {(emojiSearch.trim()
                     ? EMOJI_SEARCH_DATA.filter(({ k }) => k.includes(emojiSearch.toLowerCase().trim())).map(({ e }) => e)
                     : FOLDER_EMOJIS
@@ -688,14 +688,7 @@ function SortableBookmarkItem({
           <GripVertical size={14} />
         </span>
 
-        <img
-          src={`https://www.google.com/s2/favicons?sz=20&domain=${bookmark.domain}`}
-          alt=""
-          width={18}
-          height={18}
-          className="shrink-0 mt-0.5 rounded-sm"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-        />
+        <FaviconImg domain={bookmark.domain} size={20} className="mt-0.5" />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
@@ -963,6 +956,21 @@ type PageGroup = {
   bookmarks: Bookmark[];
 };
 
+function FaviconImg({ domain, size = 16, className = "" }: { domain: string; size?: number; className?: string }) {
+  const [errored, setErrored] = useState(false);
+  if (errored) return <Globe size={size} className={cn("text-muted-foreground/40 shrink-0", className)} />;
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?sz=${size}&domain=${domain}`}
+      alt=""
+      width={size}
+      height={size}
+      className={cn("shrink-0 rounded-sm", className)}
+      onError={() => setErrored(true)}
+    />
+  );
+}
+
 function openBookmark(b: Bookmark): void {
   recordBookmarkOpen(b.id);
   if (b.type === "SNIPPET" && b.snippet) {
@@ -1021,13 +1029,7 @@ function PageGroupHeader({ group, expanded, onToggle }: {
       <span className="text-muted-foreground w-3.5 flex items-center justify-center">
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </span>
-      <img
-        src={`https://www.google.com/s2/favicons?sz=16&domain=${group.domain}`}
-        width={16}
-        height={16}
-        className="shrink-0"
-        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-      />
+      <FaviconImg domain={group.domain} size={16} />
       <span className="flex-1 min-w-0 text-sm font-semibold text-foreground truncate">
         {group.title}
       </span>
@@ -1101,12 +1103,7 @@ function RemindersSection({
         <div className="divide-y divide-amber-200/40 dark:divide-amber-800/30">
           {bookmarks.map((b) => (
             <div key={b.id} className="flex items-center gap-2 px-3 py-2">
-              <img
-                src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
-                alt=""
-                className="w-4 h-4 shrink-0 rounded-sm"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
+              <FaviconImg domain={b.domain} size={16} />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-foreground truncate">{b.name}</div>
                 <div className="text-[10px] text-muted-foreground truncate">{b.domain}</div>
@@ -1368,13 +1365,20 @@ type BookmarkListProps = {
   onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
   onToggleFavorite?: (id: string) => void;
   searchFolderIds?: string[];
+  defaultPageSize: number;
+  filterKey: string;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [] }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [], defaultPageSize, filterKey }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(defaultPageSize === 0 ? Infinity : defaultPageSize);
+
+  useEffect(() => {
+    setVisibleCount(defaultPageSize === 0 ? Infinity : defaultPageSize);
+  }, [filterKey, defaultPageSize]);
 
   useEffect(() => {
     if (!focusedId) return;
@@ -1403,6 +1407,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
     sortBy,
   );
 
+  const visible = isFinite(visibleCount) ? filtered.slice(0, visibleCount) : filtered;
   const visibleIds = filtered.map((b) => b.id);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1525,11 +1530,14 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
   if (filtered.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full py-24 text-center">
+        {isSearching
+          ? <BookmarkX size={32} className="text-muted-foreground/40 mb-3" />
+          : <FolderSearch size={32} className="text-muted-foreground/40 mb-3" />}
         <h3 className="text-base font-semibold text-foreground">
-          {isSearching ? "No results" : "No bookmarks here"}
+          {isSearching ? "No results" : "This folder is empty"}
         </h3>
         <p className="text-sm text-muted-foreground mt-1">
-          {isSearching ? "No matching bookmarks found." : "No bookmarks in this folder yet."}
+          {isSearching ? "Try a different search term." : "Save a page or snippet to get started."}
         </p>
       </div>
     );
@@ -1563,14 +1571,28 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
           Search results ({filtered.length})
         </h3>
         <div className="space-y-2">
-          {filtered.map((b) => renderBookmarkItem(b, folders[b.folderId]?.name))}
+          {visible.map((b) => renderBookmarkItem(b, folders[b.folderId]?.name))}
         </div>
+        {isFinite(visibleCount) && visibleCount < filtered.length && (
+          <div className="pt-3 flex items-center justify-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setVisibleCount((v) => Math.min(v + 50, filtered.length))}
+            >
+              Show 50 more
+              <span className="ml-1.5 text-muted-foreground text-xs">
+                ({filtered.length - visibleCount} remaining)
+              </span>
+            </Button>
+          </div>
+        )}
         <KeyHintBar />
       </div>
     );
   }
 
-  const groups = groupByUrl(filtered);
+  const groups = groupByUrl(visible);
 
   return (
     <div onKeyDown={handleKeyDown}>
@@ -1601,6 +1623,20 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
           );
         })}
       </div>
+      {isFinite(visibleCount) && visibleCount < filtered.length && (
+        <div className="pt-3 flex items-center justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setVisibleCount((v) => Math.min(v + 50, filtered.length))}
+          >
+            Show 50 more
+            <span className="ml-1.5 text-muted-foreground text-xs">
+              ({filtered.length - visibleCount} remaining)
+            </span>
+          </Button>
+        </div>
+      )}
       <KeyHintBar />
     </div>
   );
@@ -1673,106 +1709,106 @@ function CommandPalette({
     [folders, rootFolderId],
   );
 
+  const noMatches = query.trim().length > 0 && matchingBookmarks.length === 0 && matchingFolders.length === 0;
+
   return (
-    <CommandDialog open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
-      <CommandInput
-        value={query}
-        onValueChange={setQuery}
-        placeholder="Search bookmarks, folders, or an action…"
-      />
-      <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
-
-        {/* Actions group — always rendered; cmdk filters when query is typed */}
-        <CommandGroup heading={query ? "Actions" : "Quick actions"}>
-          {!query &&
-            topFolders.map((f) => (
-              <CommandItem
-                key={f.id}
-                value={`go to folder ${f.name}`}
-                onSelect={() => { onNavigateToFolder(f.id); close(); }}
-              >
-                <FolderIcon size={14} />
-                <span>
-                  Go to <strong>{f.name}</strong>
-                </span>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
+      <DialogContent className="overflow-hidden p-0 shadow-lg sm:max-w-lg">
+        <Command
+          shouldFilter={false}
+          className="**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 **:[[cmdk-group]]:px-2 **:[[cmdk-input-wrapper]_svg]:h-5 **:[[cmdk-input-wrapper]_svg]:w-5 **:[[cmdk-input]]:h-12 **:[[cmdk-item]]:px-2 **:[[cmdk-item]]:py-3 **:[[cmdk-item]_svg]:h-5 **:[[cmdk-item]_svg]:w-5"
+        >
+          <CommandInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder="Search bookmarks, folders, or an action…"
+          />
+          <CommandList>
+            {/* Actions — always visible regardless of query */}
+            <CommandGroup heading={query ? "Actions" : "Quick actions"}>
+              {!query &&
+                topFolders.map((f) => (
+                  <CommandItem
+                    key={f.id}
+                    value={`go to folder ${f.name}`}
+                    onSelect={() => { onNavigateToFolder(f.id); close(); }}
+                  >
+                    <FolderIcon size={14} />
+                    <span>Go to <strong>{f.name}</strong></span>
+                  </CommandItem>
+                ))}
+              <CommandItem value="new folder create" onSelect={() => { onNewFolder(); close(); }}>
+                <Plus size={14} />
+                <span>New folder</span>
               </CommandItem>
-            ))}
-          <CommandItem value="new folder create" onSelect={() => { onNewFolder(); close(); }}>
-            <Plus size={14} />
-            <span>New folder</span>
-          </CommandItem>
-          <CommandItem
-            value="check dead links broken scan"
-            onSelect={() => { onCheckDeadLinks(); close(); }}
-          >
-            <Link2 size={14} />
-            <span>Check dead links</span>
-          </CommandItem>
-          <CommandItem
-            value="export library download json"
-            onSelect={() => { onExport(); close(); }}
-          >
-            <Download size={14} />
-            <span>Export library</span>
-          </CommandItem>
-          <CommandItem
-            value="settings preferences configure"
-            onSelect={() => { onOpenSettings(); close(); }}
-          >
-            <Settings size={14} />
-            <span>Settings</span>
-          </CommandItem>
-          <CommandItem
-            value="keyboard shortcuts help reference"
-            onSelect={() => { onShowShortcuts(); close(); }}
-          >
-            <HelpCircle size={14} />
-            <span>Keyboard shortcuts</span>
-            <CommandShortcut>?</CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
-
-        {matchingBookmarks.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Bookmarks">
-              {matchingBookmarks.map((b) => (
-                <CommandItem
-                  key={b.id}
-                  value={`bookmark ${b.name} ${b.domain}`}
-                  onSelect={() => { onOpenBookmark(b); close(); }}
-                >
-                  <Link2 size={14} className="shrink-0 text-muted-foreground" />
-                  <span className="truncate flex-1">{b.name}</span>
-                  <CommandShortcut className="text-muted-foreground/60 text-[10px] normal-case tracking-normal">
-                    {b.domain}
-                  </CommandShortcut>
-                </CommandItem>
-              ))}
+              <CommandItem value="check dead links broken scan" onSelect={() => { onCheckDeadLinks(); close(); }}>
+                <Link2 size={14} />
+                <span>Check dead links</span>
+              </CommandItem>
+              <CommandItem value="export library download json" onSelect={() => { onExport(); close(); }}>
+                <Download size={14} />
+                <span>Export library</span>
+              </CommandItem>
+              <CommandItem value="settings preferences configure" onSelect={() => { onOpenSettings(); close(); }}>
+                <Settings size={14} />
+                <span>Settings</span>
+              </CommandItem>
+              <CommandItem value="keyboard shortcuts help reference" onSelect={() => { onShowShortcuts(); close(); }}>
+                <HelpCircle size={14} />
+                <span>Keyboard shortcuts</span>
+                <CommandShortcut>?</CommandShortcut>
+              </CommandItem>
             </CommandGroup>
-          </>
-        )}
 
-        {matchingFolders.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Folders">
-              {matchingFolders.map((f) => (
-                <CommandItem
-                  key={f.id}
-                  value={`folder ${f.name}`}
-                  onSelect={() => { onNavigateToFolder(f.id); close(); }}
-                >
-                  <FolderIcon size={14} className="shrink-0 text-muted-foreground" />
-                  <span>{f.name}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
-        )}
-      </CommandList>
-    </CommandDialog>
+            {/* Inline no-match note when query finds nothing */}
+            {noMatches && (
+              <p className="px-4 py-3 text-sm text-muted-foreground">
+                No bookmarks or folders match &ldquo;{query}&rdquo;.
+              </p>
+            )}
+
+            {matchingBookmarks.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Bookmarks">
+                  {matchingBookmarks.map((b) => (
+                    <CommandItem
+                      key={b.id}
+                      value={`bookmark ${b.name} ${b.domain}`}
+                      onSelect={() => { onOpenBookmark(b); close(); }}
+                    >
+                      <Link2 size={14} className="shrink-0 text-muted-foreground" />
+                      <span className="truncate flex-1">{b.name}</span>
+                      <CommandShortcut className="text-muted-foreground/60 text-[10px] normal-case tracking-normal">
+                        {b.domain}
+                      </CommandShortcut>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+
+            {matchingFolders.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Folders">
+                  {matchingFolders.map((f) => (
+                    <CommandItem
+                      key={f.id}
+                      value={`folder ${f.name}`}
+                      onSelect={() => { onNavigateToFolder(f.id); close(); }}
+                    >
+                      <FolderIcon size={14} className="shrink-0 text-muted-foreground" />
+                      <span>{f.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -2700,6 +2736,8 @@ export default function Library() {
                 onSaveReminder={handleSaveReminderDirect}
                 onToggleFavorite={handleToggleFavorite}
                 searchFolderIds={searchFolderIds}
+                defaultPageSize={prefs.defaultPageSize}
+                filterKey={`${_currentFolderId}:${searchQuery}:${sortBy}:${dashboardFilter ?? ""}:${activeTagFilters.join(",")}`}
               />
             </div>
           </div>
@@ -2850,6 +2888,27 @@ export default function Library() {
                 <p className="text-xs text-muted-foreground">How long the save-snippet card stays visible on AI pages (5–30 s).</p>
               </div>
               <div className="space-y-2 border-t border-border pt-4">
+                <p className="text-sm font-medium">Library display</p>
+                <div className="flex items-center justify-between text-sm">
+                  <label className="font-medium">Bookmarks shown by default</label>
+                  <Select
+                    value={String(prefsDraft.defaultPageSize)}
+                    onValueChange={(v) => setPrefsDraft((d) => ({ ...d, defaultPageSize: Number(v) }))}
+                  >
+                    <SelectTrigger className="w-28 h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                      <SelectItem value="500">500</SelectItem>
+                      <SelectItem value="0">All</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">How many bookmarks to show before "Show more". Applies to folder views and search results.</p>
+              </div>
+              <div className="space-y-2 border-t border-border pt-4">
                 <p className="text-sm font-medium">Reminders</p>
                 <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
                   <input
@@ -2864,14 +2923,14 @@ export default function Library() {
                   <div className="flex items-center gap-2 text-sm text-muted-foreground pl-5">
                     Notify at:
                     <input
-                      type="number"
-                      min={0}
-                      max={23}
-                      value={prefsDraft.reminderNotificationHour}
-                      onChange={(e) => setPrefsDraft((d) => ({ ...d, reminderNotificationHour: Math.min(23, Math.max(0, Number(e.target.value))) }))}
-                      className="w-14 border border-border rounded px-1.5 py-0.5 bg-background text-foreground text-center"
+                      type="time"
+                      value={`${String(prefsDraft.reminderNotificationHour).padStart(2, "0")}:00`}
+                      onChange={(e) => {
+                        const h = parseInt(e.target.value.split(":")[0], 10);
+                        if (!isNaN(h)) setPrefsDraft((d) => ({ ...d, reminderNotificationHour: h }));
+                      }}
+                      className="border border-border rounded px-1.5 py-0.5 bg-background text-foreground text-sm"
                     />
-                    :00
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">When enabled, ZeroPin sends one daily OS notification if you have due reminders. The Reminders section in the library is always available regardless of this setting.</p>

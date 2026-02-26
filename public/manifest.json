@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ZeroPin",
   "version": "0.2.0",
-  "description": "Local-first bookmark and snippet manager for web pages and AI chats.",
+  "description": "Save pages, text snippets, and AI chat answers into an organised local library. Highlights saved passages when you revisit them. Folder hierarchy, tags, reminders, and a command palette — all stored privately on your device.",
   "permissions": ["contextMenus", "storage", "tabs", "activeTab", "clipboardWrite", "alarms", "notifications"],
   "host_permissions": ["*://*/*"],
   "background": {

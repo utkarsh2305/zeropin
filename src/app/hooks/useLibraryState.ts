@@ -15,6 +15,7 @@ const DEFAULT_PREFS: Prefs = {
   reminderNotificationHour: 9,
   unreadTrackingEnabled: false,
   unreadThresholdDays: 60,
+  defaultPageSize: 50,
 };
 
 // ── Return type ───────────────────────────────────────────────────────────────

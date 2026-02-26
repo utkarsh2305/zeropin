@@ -8,10 +8,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell } from "lucide-react";
+import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell, Globe, Pin } from "lucide-react";
 import { BrandIcon } from "./app/BrandIcon";
 import type { Bookmark, LibraryState } from "./core/types";
 import "./app.css";
+
+function PopupFaviconImg({ domain }: { domain: string }) {
+  const [errored, setErrored] = useState(false);
+  if (errored) return <Globe size={16} className="text-muted-foreground/40 shrink-0 mt-0.5" />;
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?sz=16&domain=${domain}`}
+      alt=""
+      width={16}
+      height={16}
+      className="w-4 h-4 shrink-0 rounded-sm mt-0.5"
+      onError={() => setErrored(true)}
+    />
+  );
+}
 
 function isDue(b: Bookmark): boolean {
   if (!b.reminderAt) return false;
@@ -241,12 +256,7 @@ function Popup() {
                     onClick={() => openPin(b)}
                     className="flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-amber-500/10 transition-colors w-full"
                   >
-                    <img
-                      src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
-                      alt=""
-                      className="w-4 h-4 shrink-0 rounded-sm mt-0.5"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
+                    <PopupFaviconImg domain={b.domain} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm truncate">{b.name}</span>
@@ -270,10 +280,13 @@ function Popup() {
               {isSearching ? `Search Results (${searchResults.length})` : "Recently Pinned"}
             </div>
             {displayList.length === 0 ? (
-              <div className="text-xs text-muted-foreground py-6 text-center">
-                {isSearching
-                  ? "No matching pins found."
-                  : "No pins yet. Select text, right-click, and Pin It."}
+              <div className="flex flex-col items-center py-6 text-center gap-2">
+                <Pin size={20} className="text-muted-foreground/40" />
+                <p className="text-xs text-muted-foreground">
+                  {isSearching
+                    ? "No matching pins."
+                    : "No pins yet. Right-click any page and select \"Save to ZeroPin\"."}
+                </p>
               </div>
             ) : (
               <div className="flex flex-col gap-0.5">
@@ -283,12 +296,7 @@ function Popup() {
                     onClick={() => openPin(b)}
                     className="flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-accent/50 transition-colors w-full"
                   >
-                    <img
-                      src={`https://www.google.com/s2/favicons?sz=16&domain=${b.domain}`}
-                      alt=""
-                      className="w-4 h-4 shrink-0 rounded-sm mt-0.5"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
+                    <PopupFaviconImg domain={b.domain} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm truncate">{b.name}</span>

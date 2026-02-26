@@ -210,7 +210,7 @@ function FakeArticlePage({
         Understanding Modern Web Architecture
       </h2>
       <div className="text-[11px] text-muted-foreground mb-4">
-        by Jane Smith · Published Feb 12, 2026 · 8 min read
+        by Jane Smith · Published {new Date().toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })} · 8 min read
       </div>
       <p className="text-[13px] text-foreground">
         Web applications have evolved significantly over the past decade. The shift from

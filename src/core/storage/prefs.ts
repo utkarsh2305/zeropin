@@ -15,6 +15,8 @@ export interface Prefs {
   unreadTrackingEnabled: boolean;
   /** Number of days without opening before a bookmark is counted as unread. Default 60. */
   unreadThresholdDays: number;
+  /** Initial number of bookmarks to render before "Show more". 0 = show all. Default 50. */
+  defaultPageSize: number;
 }
 
 const DEFAULT_PREFS: Prefs = {
@@ -24,6 +26,7 @@ const DEFAULT_PREFS: Prefs = {
   reminderNotificationHour: 9,
   unreadTrackingEnabled: false,
   unreadThresholdDays: 60,
+  defaultPageSize: 50,
 };
 
 /** Returns stored prefs merged with defaults (missing keys fall back to defaults). */

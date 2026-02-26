@@ -98,4 +98,15 @@ describe("setPrefs", () => {
     expect(p.reminderNotificationEnabled).toBe(false);
     expect(p.highlightDurationMs).toBe(3000);
   });
+
+  it("persists defaultPageSize", async () => {
+    await setPrefs({ defaultPageSize: 100 });
+    const p = await getPrefs();
+    expect(p.defaultPageSize).toBe(100);
+  });
+
+  it("defaultPageSize falls back to 50 when unset", async () => {
+    const p = await getPrefs();
+    expect(p.defaultPageSize).toBe(50);
+  });
 });

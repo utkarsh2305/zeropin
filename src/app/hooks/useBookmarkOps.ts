@@ -74,6 +74,7 @@ export interface BookmarkOpsResult {
   deadLinkModalResult: { dead: number; total: number } | null;
   handleDeleteBookmark: (id: string) => void;
   handleCheckDeadLinks: () => Promise<void>;
+  handleStopDeadLinkCheck: () => void;
   handlePickerSave: (folderId: string) => Promise<void>;
   handleRenameBookmark: (id: string, name: string) => Promise<void>;
   handleSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => Promise<void>;
@@ -119,6 +120,9 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
   // Stale-closure guard for DnD callback
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Abort controller for dead link checks
+  const deadLinkAbortRef = useRef<AbortController | null>(null);
 
   // ── DnD ───────────────────────────────────────────────────────────────────
 
@@ -373,10 +377,19 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
 
   // ── Dead links ────────────────────────────────────────────────────────────
 
+  const handleStopDeadLinkCheck = () => {
+    deadLinkAbortRef.current?.abort();
+    setDeadLinkChecking(false);
+    setDeadLinkProgress(0);
+    setDeadLinkTotal(0);
+  };
+
   const handleCheckDeadLinks = async () => {
     if (deadLinkChecking) return;
     const bookmarkList = Object.values(state.bookmarks);
     if (bookmarkList.length === 0) return;
+    const controller = new AbortController();
+    deadLinkAbortRef.current = controller;
     setDeadLinkChecking(true);
     setDeadLinkProgress(0);
     setDeadLinkTotal(bookmarkList.length);
@@ -384,18 +397,27 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     const BATCH = 10;
     const deadIds: string[] = [];
     for (let i = 0; i < bookmarkList.length; i += BATCH) {
+      if (controller.signal.aborted) break;
       const batch = bookmarkList.slice(i, i + BATCH);
       await Promise.all(batch.map(async (b) => {
         try {
-          const res = await fetch(b.url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+          const res = await fetch(b.url, {
+            method: "HEAD",
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+          });
           if (res.status === 404 || res.status === 410) deadIds.push(b.id);
-        } catch { /* timeout / CORS / network error = treat as working */ }
+        } catch { /* timeout / CORS / network error / abort = treat as working */ }
       }));
+      if (controller.signal.aborted) break;
       setDeadLinkProgress(Math.min(i + BATCH, bookmarkList.length));
       if (i + BATCH < bookmarkList.length) {
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise<void>((r) => {
+          const t = setTimeout(r, 500);
+          controller.signal.addEventListener("abort", () => { clearTimeout(t); r(); }, { once: true });
+        });
       }
     }
+    if (controller.signal.aborted) return;
     await updateDeadLinkResults(bookmarkList.map((b) => ({ id: b.id, isDeadLink: deadIds.includes(b.id) })));
     setDeadLinkChecking(false);
     setDeadLinkModalResult({ dead: deadIds.length, total: bookmarkList.length });
@@ -552,6 +574,7 @@ export function useBookmarkOps(deps: BookmarkOpsDeps): BookmarkOpsResult {
     deadLinkModalResult,
     handleDeleteBookmark,
     handleCheckDeadLinks,
+    handleStopDeadLinkCheck,
     handlePickerSave,
     handleRenameBookmark,
     handleSetBookmarkTags,

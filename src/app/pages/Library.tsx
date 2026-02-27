@@ -129,6 +129,7 @@ function HealthDashboard({
   deadLinkTotal,
   activeFilter,
   onDeadLinksClick,
+  onStopDeadLinkCheck,
   onFavoritesClick,
   onNotesClick,
 }: {
@@ -140,17 +141,26 @@ function HealthDashboard({
   deadLinkTotal: number;
   activeFilter: DashboardFilter | null;
   onDeadLinksClick: () => void;
+  onStopDeadLinkCheck: () => void;
   onFavoritesClick: () => void;
   onNotesClick: () => void;
 }) {
   return (
     <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
       <button
-        onClick={onDeadLinksClick}
-        title={deadCount > 0 ? "URLs that returned 404 or are no longer accessible" : "Click to check all saved links for 404s"}
+        onClick={deadLinkChecking ? onStopDeadLinkCheck : onDeadLinksClick}
+        title={
+          deadLinkChecking
+            ? "Click to stop the check"
+            : deadCount > 0
+            ? "URLs that returned 404 or are no longer accessible"
+            : "Click to check all saved links for 404s"
+        }
         className={cn(
           "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
-          deadCount > 0 && activeFilter === "deadlinks"
+          deadLinkChecking
+            ? "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+            : deadCount > 0 && activeFilter === "deadlinks"
             ? "bg-destructive/10 text-destructive border-destructive/30"
             : deadCount > 0
             ? "border-destructive/40 text-destructive hover:bg-destructive/10"
@@ -159,7 +169,7 @@ function HealthDashboard({
       >
         <Link2 size={13} />
         {deadLinkChecking
-          ? `Checking… ${deadLinkProgress}/${deadLinkTotal}`
+          ? `Checking ${deadLinkProgress}/${deadLinkTotal} — click to stop`
           : deadCount > 0
           ? `${deadCount} dead link${deadCount !== 1 ? "s" : ""}`
           : "Check links"}
@@ -2399,6 +2409,7 @@ export default function Library() {
     deadLinkModalResult,
     handleDeleteBookmark,
     handleCheckDeadLinks,
+    handleStopDeadLinkCheck,
     handleRenameBookmark,
     handleSetBookmarkTags,
     handleDismissReminder,
@@ -2557,7 +2568,8 @@ export default function Library() {
                 deadLinkProgress={deadLinkProgress}
                 deadLinkTotal={deadLinkTotal}
                 activeFilter={dashboardFilter}
-                onDeadLinksClick={() => { if (!deadLinkChecking) { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } } }}
+                onDeadLinksClick={() => { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } }}
+                onStopDeadLinkCheck={handleStopDeadLinkCheck}
                 onFavoritesClick={() => setDashboardFilter((f) => f === "favorites" ? null : "favorites")}
                 onNotesClick={() => setDashboardFilter((f) => f === "notes" ? null : "notes")}
               />

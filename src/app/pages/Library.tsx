@@ -1402,11 +1402,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
   // - not searching → current folder + descendants only
   const activeIds: Set<string> | null = useMemo(() => {
     if (searchFolderIds.length > 0) {
-      const ids = new Set<string>();
-      for (const fid of searchFolderIds) {
-        for (const id of getDescendantFolderIds(fid, folders)) ids.add(id);
-      }
-      return ids;
+      return new Set(searchFolderIds);
     }
     if (isSearching) return null;
     return getDescendantFolderIds(activeFolderId, folders);
@@ -2307,6 +2303,19 @@ export default function Library() {
   } as unknown as LibraryState);
 
   const _currentFolderId = state ? (activeFolderId ?? state.rootFolderId) : "";
+  const folderScopeSummary = useMemo(() => {
+    if (!state || searchFolderIds.length === 0) return { short: "All folders", full: "All folders" };
+    const names = Array.from(new Set(searchFolderIds))
+      .map((id) => state.folders[id]?.name)
+      .filter((name): name is string => Boolean(name))
+      .sort((a, b) => a.localeCompare(b));
+    if (names.length === 0) return { short: "All folders", full: "All folders" };
+    const short =
+      names.length <= 2
+        ? names.map((name) => truncate(name, 18)).join(", ")
+        : `${truncate(names[0], 18)}, ${truncate(names[1], 18)} +${names.length - 2}`;
+    return { short, full: names.join(", ") };
+  }, [state, searchFolderIds]);
 
   const pipeline = useFilterPipeline(_safeState, prefs, {
     searchQuery,
@@ -2471,19 +2480,93 @@ export default function Library() {
                   placeholder="Search bookmarks\u2026"
                   value={searchQuery}
                   onChange={(e) => { setSearchQuery(e.target.value); if (e.target.value.trim()) setDashboardFilter(null); }}
-                  className={cn("h-9 w-full", searchQuery && "pr-8")}
+                  className="h-9 w-full pr-20"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery("")}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    className="absolute right-10 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                     title="Clear search"
                   >
                     <X size={14} />
                   </button>
                 )}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "absolute right-1 top-1/2 h-7 w-8 -translate-y-1/2 rounded-r-md border-l border-border/70 flex items-center justify-center bg-background/80 transition-colors",
+                        searchFolderIds.length > 0
+                          ? "text-primary bg-primary/5"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                      )}
+                      title={searchFolderIds.length > 0 ? `Searching in ${searchFolderIds.length} folder${searchFolderIds.length !== 1 ? "s" : ""}` : "Search scope: all folders"}
+                    >
+                      <FolderSearch size={14} />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" align="end">
+                    <div className="text-xs font-medium text-muted-foreground px-1 mb-1.5">Search in folders</div>
+                    <button
+                      onClick={() => setSearchFolderIds([])}
+                      className={cn(
+                        "flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors",
+                        searchFolderIds.length === 0
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "hover:bg-muted text-foreground"
+                      )}
+                    >
+                      <FolderIcon size={13} />
+                      {state.folders[state.rootFolderId]?.name ?? "ZeroPin"}
+                    </button>
+                    <div className="my-1 border-t border-border" />
+                    {(() => {
+                      const renderTree = (parentId: string, depth: number): React.ReactNode[] => {
+                        const children = Object.values(state.folders)
+                          .filter((f) => f.parentId === parentId)
+                          .sort((a, b) => a.name.localeCompare(b.name));
+                        return children.flatMap((folder) => {
+                          const isSelected = searchFolderIds.includes(folder.id);
+                          return [
+                            <button
+                              key={folder.id}
+                              onClick={() => {
+                                const subtreeIds = getDescendantFolderIds(folder.id, state.folders);
+                                setSearchFolderIds((prev) => {
+                                  const next = new Set(prev);
+                                  const shouldSelect = !next.has(folder.id);
+                                  for (const id of subtreeIds) {
+                                    if (shouldSelect) next.add(id);
+                                    else next.delete(id);
+                                  }
+                                  return Array.from(next);
+                                });
+                              }}
+                              style={{ paddingLeft: `${8 + depth * 5}px` }}
+                              className={cn(
+                                "flex items-center gap-2 w-full pr-2 py-1.5 rounded text-sm transition-colors",
+                                isSelected
+                                  ? "bg-primary/10 text-primary font-medium"
+                                  : "hover:bg-muted text-foreground"
+                              )}
+                            >
+                              <div className={cn("w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 text-[9px]", isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border")}>
+                                {isSelected && "✓"}
+                              </div>
+                              <span className="truncate">{folder.name}</span>
+                            </button>,
+                            ...renderTree(folder.id, depth + 1),
+                          ];
+                        });
+                      };
+                      return renderTree(state.rootFolderId, 0);
+                    })()}
+                  </PopoverContent>
+                </Popover>
               </div>
               {/* Folder scope selector */}
+              {false && state && (
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -2512,12 +2595,12 @@ export default function Library() {
                     )}
                   >
                     <FolderIcon size={13} />
-                    {state.folders[state.rootFolderId]?.name ?? "ZeroPin"}
+                    {_safeState.folders[_safeState.rootFolderId]?.name ?? "ZeroPin"}
                   </button>
                   <div className="my-1 border-t border-border" />
                   {(() => {
                     const renderTree = (parentId: string, depth: number): React.ReactNode[] => {
-                      const children = Object.values(state.folders)
+                      const children = Object.values(_safeState.folders)
                         .filter((f) => f.parentId === parentId)
                         .sort((a, b) => a.name.localeCompare(b.name));
                       return children.flatMap((folder) => {
@@ -2525,11 +2608,18 @@ export default function Library() {
                         return [
                           <button
                             key={folder.id}
-                            onClick={() =>
-                              setSearchFolderIds((prev) =>
-                                isSelected ? prev.filter((id) => id !== folder.id) : [...prev, folder.id]
-                              )
-                            }
+                            onClick={() => {
+                              const subtreeIds = getDescendantFolderIds(folder.id, _safeState.folders);
+                              setSearchFolderIds((prev) => {
+                                const next = new Set(prev);
+                                const shouldSelect = !next.has(folder.id);
+                                for (const id of subtreeIds) {
+                                  if (shouldSelect) next.add(id);
+                                  else next.delete(id);
+                                }
+                                return Array.from(next);
+                              });
+                            }}
                             style={{ paddingLeft: `${8 + depth * 5}px` }}
                             className={cn(
                               "flex items-center gap-2 w-full pr-2 py-1.5 rounded text-sm transition-colors",
@@ -2547,16 +2637,20 @@ export default function Library() {
                         ];
                       });
                     };
-                    return renderTree(state.rootFolderId, 0);
+                    return renderTree(_safeState.rootFolderId, 0);
                   })()}
                 </PopoverContent>
               </Popover>
+              )}
               <div className="text-right shrink-0">
                 <div className="text-xs text-muted-foreground">Folder</div>
                 <div className="text-sm font-semibold text-foreground">
                   {state.folders[currentFolderId]?.name ?? "ZeroPin"}
                 </div>
               </div>
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground truncate" title={folderScopeSummary.full}>
+              In folders: <span className="text-foreground">{folderScopeSummary.short}</span>
             </div>
             {/* Row 2: health dashboard */}
             <div className="mt-2">

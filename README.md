@@ -17,7 +17,9 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Folder hierarchy with collapsible tree, drag-and-drop reordering, and custom emoji icons
 - Empty folder indicator — subtle grey dot on empty folder rows in the sidebar tree
 - Search across name, URL, domain, snippet text, and notes with inline clear (×) button
-- Multi-folder search scope — folder scope picker next to the search bar; select one or more folders to constrain results, rendered as a tree with 5 px per depth level
+- Multi-folder search scope — folder scope picker integrated inside the search bar; select folders from a tree view with parent/child indentation
+- Parent folder auto-select — selecting a parent in search scope also selects all descendant folders
+- Compact scope summary — shows filtered folders as `name1, name2 +N` (or `All folders`) under search
 - Multi-tag intersection filtering — bookmark must match **all** selected tags to appear
 - Sidebar tag narrowing — tag list automatically collapses to only tags present in the current result set, accounting for active search query, dashboard filter, and tag filters
 - Page grouping by URL with collapsible groups
@@ -33,7 +35,8 @@ A Chrome extension (Manifest V3) that saves and organizes web and AI bookmarks l
 - Export/import library as JSON; import from browser bookmark HTML files (Chrome, Firefox, Safari, Edge)
 
 **Popup**
-- Compact toolbar popup with search and current folder shortcut
+- Compact toolbar popup with search and in-field folder scope filter
+- Folder scope shown as compact summary (`All folders` or `name1, name2 +N`) below search
 - Quick access to full Library
 - Reminder badge when due reminders exist; due reminders listed inline
 

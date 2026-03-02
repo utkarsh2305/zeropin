@@ -1,16 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
-import { getState, recordBookmarkOpen, setLastUsedFolder } from "./core/storage/local";
+import { getState, recordBookmarkOpen } from "./core/storage/local";
 import { ThemeContext, useDarkMode } from "./app/theme";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell, Globe, Pin } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell, Globe, Pin, FolderSearch } from "lucide-react";
 import { BrandIcon } from "./app/BrandIcon";
-import type { Bookmark, LibraryState } from "./core/types";
+import { cn } from "./lib/utils";
+import type { Bookmark, Folder as FolderType, LibraryState } from "./core/types";
 import "./app.css";
 
 function PopupFaviconImg({ domain }: { domain: string }) {
@@ -47,11 +48,34 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+function truncateLabel(value: string, max = 18): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function getDescendantFolderIds(
+  folderId: string,
+  folders: Record<string, FolderType>
+): Set<string> {
+  const result = new Set<string>([folderId]);
+  const queue = [folderId];
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const folder of Object.values(folders)) {
+      if (folder.parentId === current && !result.has(folder.id)) {
+        result.add(folder.id);
+        queue.push(folder.id);
+      }
+    }
+  }
+  return result;
+}
+
 function Popup() {
   const themeValue = useDarkMode();
   const { preference, toggle } = themeValue;
   const [state, setState] = useState<LibraryState | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchFolderIds, setSearchFolderIds] = useState<string[]>([]);
 
   useEffect(() => {
     getState().then(setState);
@@ -72,8 +96,18 @@ function Popup() {
 
   const q = searchQuery.trim().toLowerCase();
   const isSearching = q.length > 0;
+  const searchScopeIds = useMemo(() => {
+    if (searchFolderIds.length === 0) return null;
+    return new Set(searchFolderIds);
+  }, [searchFolderIds]);
+
+  const scopedBookmarks = useMemo(() => {
+    if (searchScopeIds === null) return allBookmarks;
+    return allBookmarks.filter((b) => searchScopeIds.has(b.folderId));
+  }, [allBookmarks, searchScopeIds]);
+
   const searchResults = isSearching
-    ? allBookmarks
+    ? scopedBookmarks
         .filter(
           (b) =>
             b.name.toLowerCase().includes(q) ||
@@ -91,16 +125,19 @@ function Popup() {
   const allDue = allBookmarks.filter(isDue).sort((a, b) => (a.reminderAt ?? 0) - (b.reminderAt ?? 0));
   const dueToShow = allDue.slice(0, 3);
   const hasMoreDue = allDue.length > 3;
-
-  // Current folder
-  const currentFolder = state
-    ? state.folders[state.lastUsedFolderId ?? ""] ??
-      state.folders[state.rootFolderId]
-    : null;
-
-  const sortedFolders = state
-    ? Object.values(state.folders).sort((a, b) => Number(a.sortKey) - Number(b.sortKey))
-    : [];
+  const folderScopeSummary = useMemo(() => {
+    if (!state || searchFolderIds.length === 0) return { short: "All folders", full: "All folders" };
+    const names = Array.from(new Set(searchFolderIds))
+      .map((id) => state.folders[id]?.name)
+      .filter((name): name is string => Boolean(name))
+      .sort((a, b) => a.localeCompare(b));
+    if (names.length === 0) return { short: "All folders", full: "All folders" };
+    const short =
+      names.length <= 2
+        ? names.map((name) => truncateLabel(name)).join(", ")
+        : `${truncateLabel(names[0])}, ${truncateLabel(names[1])} +${names.length - 2}`;
+    return { short, full: names.join(", ") };
+  }, [state, searchFolderIds]);
 
   const openPin = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
@@ -123,13 +160,6 @@ function Popup() {
     } else {
       chrome.tabs.create({ url: b.url });
     }
-  };
-
-  const openCurrentFolder = () => {
-    const folderId = currentFolder?.id ?? "";
-    chrome.tabs.create({
-      url: chrome.runtime.getURL(`library.html?folder=${folderId}`),
-    });
   };
 
   const openLibrary = () => {
@@ -201,35 +231,105 @@ function Popup() {
                 placeholder="Search pins…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-8 pl-8 text-sm"
+                className="h-9 pl-8 pr-12 text-sm"
               />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(
+                      "absolute right-1 top-1/2 h-7 w-8 -translate-y-1/2 rounded-r-md border-l border-border/70 flex items-center justify-center bg-background/80 transition-colors",
+                      searchFolderIds.length > 0
+                        ? "text-primary bg-primary/5"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                    )}
+                    title={searchFolderIds.length > 0 ? `Searching in ${searchFolderIds.length} folder${searchFolderIds.length !== 1 ? "s" : ""}` : "Search scope: all folders"}
+                  >
+                    <FolderSearch size={14} />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-2" align="end">
+                  <div className="flex items-center justify-between px-1 mb-1.5">
+                    <div className="text-xs font-medium text-muted-foreground">Search in folders</div>
+                    {searchFolderIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchFolderIds([])}
+                        className="text-[11px] text-primary hover:text-primary/80 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSearchFolderIds([])}
+                    className={cn(
+                      "flex items-center gap-2 w-full px-2 py-1.5 rounded text-sm transition-colors",
+                      searchFolderIds.length === 0
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "hover:bg-muted text-foreground"
+                    )}
+                  >
+                    <Folder size={13} />
+                    {state.folders[state.rootFolderId]?.name ?? "ZeroPin"}
+                  </button>
+                  <div className="my-1 border-t border-border" />
+                  <div className="max-h-64 overflow-y-auto pr-1">
+                    {(() => {
+                      const renderTree = (parentId: string, depth: number): ReactNode[] => {
+                        const children = Object.values(state.folders)
+                          .filter((folder) => folder.parentId === parentId)
+                          .sort((a, b) => a.name.localeCompare(b.name));
+                        return children.flatMap((folder) => {
+                          const isSelected = searchFolderIds.includes(folder.id);
+                          return [
+                            <button
+                              type="button"
+                              key={folder.id}
+                              onClick={() => {
+                                const subtreeIds = getDescendantFolderIds(folder.id, state.folders);
+                                setSearchFolderIds((prev) => {
+                                  const next = new Set(prev);
+                                  const shouldSelect = !next.has(folder.id);
+                                  for (const id of subtreeIds) {
+                                    if (shouldSelect) next.add(id);
+                                    else next.delete(id);
+                                  }
+                                  return Array.from(next);
+                                });
+                              }}
+                              style={{ paddingLeft: `${8 + depth * 14}px` }}
+                              className={cn(
+                                "flex items-center gap-2 w-full pr-2 py-1.5 rounded text-sm transition-colors",
+                                isSelected
+                                  ? "bg-primary/10 text-primary font-medium"
+                                  : "hover:bg-muted text-foreground"
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 text-[9px]",
+                                  isSelected ? "bg-primary border-primary text-primary-foreground" : "border-border"
+                                )}
+                              >
+                                {isSelected ? <span className="w-1.5 h-1.5 rounded-[1px] bg-primary-foreground" /> : null}
+                              </div>
+                              <span className="truncate">{folder.name}</span>
+                            </button>,
+                            ...renderTree(folder.id, depth + 1),
+                          ];
+                        });
+                      };
+                      return renderTree(state.rootFolderId, 0);
+                    })()}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
-          </div>
-
-          {/* Current Folder switcher */}
-          <div className="flex items-center gap-1.5 w-full px-3 py-1.5 border-b border-border">
-            <Folder size={14} className="text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground text-sm shrink-0">Folder:</span>
-            <Select
-              value={currentFolder?.id ?? ""}
-              onValueChange={async (id) => { try { await setLastUsedFolder(id); } catch { /* ignore */ } }}
-            >
-              <SelectTrigger className="h-7 text-sm flex-1 border-none shadow-none px-1 focus:ring-0 focus:ring-offset-0">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {sortedFolders.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button
-              onClick={openCurrentFolder}
-              className="text-muted-foreground opacity-50 hover:opacity-100 transition-opacity shrink-0 p-0.5"
-              title="Open folder in Library"
-            >
-              <ExternalLink size={12} />
-            </button>
+            <div className="mt-1 text-[11px] text-muted-foreground truncate" title={folderScopeSummary.full}>
+              In folders: <span className="text-foreground">{folderScopeSummary.short}</span>
+            </div>
           </div>
 
           {/* Due Reminders — only shown when there are due reminders */}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ZeroPin",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Save pages, snippets & AI answers to a private library. Highlights saved text on revisit. Tags, folders, reminders & command palette",
   "permissions": ["contextMenus", "storage", "tabs", "activeTab", "clipboardWrite", "alarms", "notifications"],
   "host_permissions": ["*://*/*"],

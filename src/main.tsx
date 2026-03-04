@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell, Globe, Pin, FolderSearch } from "lucide-react";
+import { Sun, Moon, Monitor, ExternalLink, Library, Folder, Search, Bell, Globe, Pin, Funnel } from "lucide-react";
 import { BrandIcon } from "./app/BrandIcon";
 import { cn } from "./lib/utils";
 import type { Bookmark, Folder as FolderType, LibraryState } from "./core/types";
@@ -76,6 +76,8 @@ function Popup() {
   const [state, setState] = useState<LibraryState | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFolderIds, setSearchFolderIds] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   useEffect(() => {
     getState().then(setState);
@@ -106,8 +108,25 @@ function Popup() {
     return allBookmarks.filter((b) => searchScopeIds.has(b.folderId));
   }, [allBookmarks, searchScopeIds]);
 
+  const dateFilteredBookmarks = useMemo(() => {
+    if (!dateFrom && !dateTo) return scopedBookmarks;
+
+    return scopedBookmarks.filter((b) => {
+      const createdAt = b.createdAt;
+      if (dateFrom) {
+        const fromTs = new Date(`${dateFrom}T00:00:00`).getTime();
+        if (createdAt < fromTs) return false;
+      }
+      if (dateTo) {
+        const toTs = new Date(`${dateTo}T23:59:59.999`).getTime();
+        if (createdAt > toTs) return false;
+      }
+      return true;
+    });
+  }, [scopedBookmarks, dateFrom, dateTo]);
+
   const searchResults = isSearching
-    ? scopedBookmarks
+    ? dateFilteredBookmarks
         .filter(
           (b) =>
             b.name.toLowerCase().includes(q) ||
@@ -119,7 +138,7 @@ function Popup() {
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, 8)
     : [];
-  const recentPins = [...allBookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
+  const recentPins = [...dateFilteredBookmarks].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const displayList = isSearching ? searchResults : recentPins;
 
   const allDue = allBookmarks.filter(isDue).sort((a, b) => (a.reminderAt ?? 0) - (b.reminderAt ?? 0));
@@ -138,6 +157,11 @@ function Popup() {
         : `${truncateLabel(names[0])}, ${truncateLabel(names[1])} +${names.length - 2}`;
     return { short, full: names.join(", ") };
   }, [state, searchFolderIds]);
+
+  const dateScopeSummary = useMemo(() => {
+    if (!dateFrom && !dateTo) return "Any date";
+    return `${dateFrom || "…"} → ${dateTo || "…"}`;
+  }, [dateFrom, dateTo]);
 
   const openPin = (b: Bookmark) => {
     recordBookmarkOpen(b.id);
@@ -239,16 +263,49 @@ function Popup() {
                     type="button"
                     className={cn(
                       "absolute right-1 top-1/2 h-7 w-8 -translate-y-1/2 rounded-r-md border-l border-border/70 flex items-center justify-center bg-background/80 transition-colors",
-                      searchFolderIds.length > 0
+                      searchFolderIds.length > 0 || dateFrom || dateTo
                         ? "text-primary bg-primary/5"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                     )}
-                    title={searchFolderIds.length > 0 ? `Searching in ${searchFolderIds.length} folder${searchFolderIds.length !== 1 ? "s" : ""}` : "Search scope: all folders"}
+                    title={searchFolderIds.length > 0 || dateFrom || dateTo ? "Filters active" : "Filters"}
                   >
-                    <FolderSearch size={14} />
+                    <Funnel size={14} />
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-64 p-2" align="end">
+                <PopoverContent className="w-64 p-3" align="end">
+                  <div className="text-xs font-medium text-muted-foreground mb-1.5">Date added</div>
+                  <div className="space-y-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground block">From</label>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        max={dateTo || undefined}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground block">To</label>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                      />
+                    </div>
+                    {(dateFrom || dateTo) && (
+                      <button
+                        type="button"
+                        onClick={() => { setDateFrom(""); setDateTo(""); }}
+                        className="text-[11px] text-primary hover:text-primary/80 transition-colors"
+                      >
+                        Clear date
+                      </button>
+                    )}
+                  </div>
+                  <div className="my-2 border-t border-border" />
                   <div className="flex items-center justify-between px-1 mb-1.5">
                     <div className="text-xs font-medium text-muted-foreground">Search in folders</div>
                     {searchFolderIds.length > 0 && (
@@ -327,7 +384,9 @@ function Popup() {
                 </PopoverContent>
               </Popover>
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground truncate" title={folderScopeSummary.full}>
+            <div className="mt-1 text-[11px] text-muted-foreground truncate" title={`Date: ${dateScopeSummary} • Folders: ${folderScopeSummary.full}`}>
+              In dates: <span className="text-foreground">{dateScopeSummary}</span>
+              <span className="mx-1">•</span>
               In folders: <span className="text-foreground">{folderScopeSummary.short}</span>
             </div>
           </div>

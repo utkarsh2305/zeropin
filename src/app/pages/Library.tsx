@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandGroup, CommandItem, CommandSeparator, CommandShortcut } from "@/components/ui/command";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, FolderSearch, CalendarDays, Link2, Heart, StickyNote, Globe, BookmarkX } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, Funnel, FolderSearch, Link2, Heart, StickyNote, Globe, BookmarkX } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -147,33 +147,6 @@ function HealthDashboard({
 }) {
   return (
     <div className="flex flex-wrap gap-1.5 px-0.5 py-1">
-      <button
-        onClick={deadLinkChecking ? onStopDeadLinkCheck : onDeadLinksClick}
-        title={
-          deadLinkChecking
-            ? "Click to stop the check"
-            : deadCount > 0
-            ? "URLs that returned 404 or are no longer accessible"
-            : "Click to check all saved links for 404s"
-        }
-        className={cn(
-          "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
-          deadLinkChecking
-            ? "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-            : deadCount > 0 && activeFilter === "deadlinks"
-            ? "bg-destructive/10 text-destructive border-destructive/30"
-            : deadCount > 0
-            ? "border-destructive/40 text-destructive hover:bg-destructive/10"
-            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
-        )}
-      >
-        <Link2 size={13} />
-        {deadLinkChecking
-          ? `Checking ${deadLinkProgress}/${deadLinkTotal} — click to stop`
-          : deadCount > 0
-          ? `${deadCount} dead link${deadCount !== 1 ? "s" : ""}`
-          : "Check links"}
-      </button>
       {favoritesCount > 0 && (
         <button
           onClick={onFavoritesClick}
@@ -204,6 +177,33 @@ function HealthDashboard({
           {notesCount} with notes
         </button>
       )}
+      <button
+        onClick={deadLinkChecking ? onStopDeadLinkCheck : onDeadLinksClick}
+        title={
+          deadLinkChecking
+            ? "Click to stop the check"
+            : deadCount > 0
+            ? "URLs that returned 404 or are no longer accessible"
+            : "Click to check all saved links for 404s"
+        }
+        className={cn(
+          "inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full border transition-colors",
+          deadLinkChecking
+            ? "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+            : deadCount > 0 && activeFilter === "deadlinks"
+            ? "bg-destructive/10 text-destructive border-destructive/30"
+            : deadCount > 0
+            ? "border-destructive/40 text-destructive hover:bg-destructive/10"
+            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+        )}
+      >
+        <Link2 size={13} />
+        {deadLinkChecking
+          ? `Checking ${deadLinkProgress}/${deadLinkTotal} — click to stop`
+          : deadCount > 0
+          ? `${deadCount} dead link${deadCount !== 1 ? "s" : ""}`
+          : "Check links"}
+      </button>
     </div>
   );
 }
@@ -256,7 +256,7 @@ function DroppableFolder({
     if (isRenaming && renameDraft) {
       renameInputRef.current?.select();
     }
-  }, [isRenaming, renameDraft]);
+  }, [isRenaming]);
 
   useEffect(() => {
     const el = ref.current;
@@ -2040,73 +2040,15 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
 // ── FilterBar ─────────────────────────────────────────────────────────────────
 
 type FilterBarProps = {
-  dateFrom: string;
-  dateTo: string;
-  onDateFromChange: (v: string) => void;
-  onDateToChange: (v: string) => void;
   sortBy: SortKey;
   onSortChange: (v: SortKey) => void;
 };
 
 function FilterBar({
-  dateFrom, dateTo, onDateFromChange, onDateToChange,
   sortBy, onSortChange,
 }: FilterBarProps) {
   return (
-    <div className="flex gap-2 items-center">
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "h-9 shrink-0 gap-1.5 px-2",
-              (dateFrom || dateTo)
-                ? "text-primary bg-primary/10 hover:bg-primary/20"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            title="Filter by date added"
-          >
-            <CalendarDays size={15} />
-            {(dateFrom || dateTo) && (
-              <span className="text-xs font-medium">
-                {dateFrom || "…"} → {dateTo || "…"}
-              </span>
-            )}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-64 p-3 space-y-3" align="start">
-          <p className="text-xs font-medium text-foreground">Date added</p>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground block">From</label>
-            <input
-              type="date"
-              value={dateFrom}
-              max={dateTo || undefined}
-              onChange={(e) => onDateFromChange(e.target.value)}
-              className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground block">To</label>
-            <input
-              type="date"
-              value={dateTo}
-              min={dateFrom || undefined}
-              onChange={(e) => onDateToChange(e.target.value)}
-              className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
-            />
-          </div>
-          {(dateFrom || dateTo) && (
-            <button
-              className="text-xs text-muted-foreground hover:text-foreground underline"
-              onClick={() => { onDateFromChange(""); onDateToChange(""); }}
-            >
-              Clear
-            </button>
-          )}
-        </PopoverContent>
-      </Popover>
+    <div className="flex gap-2 items-center shrink-0">
       <Select value={sortBy} onValueChange={(v) => onSortChange(v as SortKey)}>
         <SelectTrigger className="w-auto h-9 text-xs shrink-0">
           <SelectValue />
@@ -2317,6 +2259,11 @@ export default function Library() {
     return { short, full: names.join(", ") };
   }, [state, searchFolderIds]);
 
+  const dateScopeSummary = useMemo(() => {
+    if (!dateFrom && !dateTo) return "Any date";
+    return `${dateFrom || "…"} → ${dateTo || "…"}`;
+  }, [dateFrom, dateTo]);
+
   const pipeline = useFilterPipeline(_safeState, prefs, {
     searchQuery,
     dateFrom,
@@ -2501,12 +2448,44 @@ export default function Library() {
                           ? "text-primary bg-primary/5"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                       )}
-                      title={searchFolderIds.length > 0 ? `Searching in ${searchFolderIds.length} folder${searchFolderIds.length !== 1 ? "s" : ""}` : "Search scope: all folders"}
+                      title={searchFolderIds.length > 0 || dateFrom || dateTo ? "Filters active" : "Filters"}
                     >
-                      <FolderSearch size={14} />
+                      <Funnel size={14} />
                     </button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-56 p-2" align="end">
+                  <PopoverContent className="w-64 p-3" align="end">
+                    <div className="text-xs font-medium text-muted-foreground mb-2">Date added</div>
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground block">From</label>
+                        <input
+                          type="date"
+                          value={dateFrom}
+                          max={dateTo || undefined}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground block">To</label>
+                        <input
+                          type="date"
+                          value={dateTo}
+                          min={dateFrom || undefined}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="w-full border border-border rounded px-2 py-1.5 text-sm bg-background text-foreground"
+                        />
+                      </div>
+                      {(dateFrom || dateTo) && (
+                        <button
+                          className="text-xs text-muted-foreground hover:text-foreground underline"
+                          onClick={() => { setDateFrom(""); setDateTo(""); }}
+                        >
+                          Clear date filter
+                        </button>
+                      )}
+                    </div>
+                    <div className="my-2 border-t border-border" />
                     <div className="text-xs font-medium text-muted-foreground px-1 mb-1.5">Search in folders</div>
                     <button
                       onClick={() => setSearchFolderIds([])}
@@ -2649,36 +2628,32 @@ export default function Library() {
                 </div>
               </div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground truncate" title={folderScopeSummary.full}>
+            <div className="mt-1 text-xs text-muted-foreground truncate" title={`Date: ${dateScopeSummary} • Folders: ${folderScopeSummary.full}`}>
+              In dates: <span className="text-foreground">{dateScopeSummary}</span>
+              <span className="mx-1">•</span>
               In folders: <span className="text-foreground">{folderScopeSummary.short}</span>
             </div>
-            {/* Row 2: health dashboard */}
-            <div className="mt-2">
-              <HealthDashboard
-                deadCount={deadLinkBookmarks.length}
-                favoritesCount={favoriteBookmarks.length}
-                notesCount={notesBookmarks.length}
-                deadLinkChecking={deadLinkChecking}
-                deadLinkProgress={deadLinkProgress}
-                deadLinkTotal={deadLinkTotal}
-                activeFilter={dashboardFilter}
-                onDeadLinksClick={() => { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } }}
-                onStopDeadLinkCheck={handleStopDeadLinkCheck}
-                onFavoritesClick={() => setDashboardFilter((f) => f === "favorites" ? null : "favorites")}
-                onNotesClick={() => setDashboardFilter((f) => f === "notes" ? null : "notes")}
-              />
-            </div>
-            {/* Row 3: filter controls + action buttons */}
-            <div className="mt-2 flex items-center gap-2">
-              <FilterBar
-                dateFrom={dateFrom}
-                dateTo={dateTo}
-                onDateFromChange={setDateFrom}
-                onDateToChange={setDateTo}
-                sortBy={sortBy}
-                onSortChange={setSortBy}
-              />
-              <div className="ml-auto pl-2 border-l border-border">
+            <div className="mt-2 flex items-start gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <FilterBar
+                  sortBy={sortBy}
+                  onSortChange={setSortBy}
+                />
+                <HealthDashboard
+                  deadCount={deadLinkBookmarks.length}
+                  favoritesCount={favoriteBookmarks.length}
+                  notesCount={notesBookmarks.length}
+                  deadLinkChecking={deadLinkChecking}
+                  deadLinkProgress={deadLinkProgress}
+                  deadLinkTotal={deadLinkTotal}
+                  activeFilter={dashboardFilter}
+                  onDeadLinksClick={() => { if (dashboardFilter === "deadlinks") { setDashboardFilter(null); } else { void handleCheckDeadLinks(); setDashboardFilter("deadlinks"); } }}
+                  onStopDeadLinkCheck={handleStopDeadLinkCheck}
+                  onFavoritesClick={() => setDashboardFilter((f) => f === "favorites" ? null : "favorites")}
+                  onNotesClick={() => setDashboardFilter((f) => f === "notes" ? null : "notes")}
+                />
+              </div>
+              <div className="shrink-0">
                 <TopBar
                   onExport={handleExport}
                   onImport={handleImport}

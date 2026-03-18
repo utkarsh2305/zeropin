@@ -6,6 +6,7 @@ import type { BookmarkMedia, Bookmark } from "./core/types";
 import { getRecentFolderIds, updateRecents, setPendingSave, RECENTS_KEY, computeFolderLabel } from "./core/storage/recents";
 import type { PendingSave } from "./core/storage/recents";
 import { getPrefs } from "./core/storage/prefs";
+import { SUMMARY_ALARM_NAME, buildSummaryAlarmConfig, runScheduledSummary } from "./core/summaries";
 
 const MSG = {
   CAPTURE_ANCHOR:        "ZP_CAPTURE_ANCHOR",
@@ -15,6 +16,7 @@ const MSG = {
   ANCHOR_RESOLVED:       "ZP_ANCHOR_RESOLVED",
   FOLDERS_CHANGED:       "ZP_FOLDERS_CHANGED",
   REMINDERS_CHANGED:     "ZP_REMINDERS_CHANGED",
+  SUMMARY_PREFS_CHANGED: "ZP_SUMMARY_PREFS_CHANGED",
 } as const;
 
 function tabsGet(tabId: number): Promise<chrome.tabs.Tab> {
@@ -125,43 +127,79 @@ async function scheduleOrRefreshDailyAlarm(): Promise<void> {
   });
 }
 
+async function scheduleOrRefreshSummaryAlarm(): Promise<void> {
+  const prefs = await getPrefs();
+  const cfg = buildSummaryAlarmConfig(prefs);
+  if (!cfg) {
+    chrome.alarms.clear(SUMMARY_ALARM_NAME);
+    return;
+  }
+  chrome.alarms.create(SUMMARY_ALARM_NAME, cfg);
+}
+
 // ── Alarm listener ────────────────────────────────────────────────────────────
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== "zp_daily_check") return;
-  await updateReminderBadge();
-  const prefs = await getPrefs();
-  if (!prefs.reminderNotificationEnabled) return;
-  const state = await getState().catch(() => null);
-  if (!state) return;
-  const count = Object.values(state.bookmarks).filter(isDue).length;
-  if (count === 0) return;
-  chrome.notifications.create("zp_reminders", {
-    type: "basic",
-    iconUrl: "icons/icon48.png",
-    title: "ZeroPin",
-    message: `${count} reminder${count === 1 ? "" : "s"} waiting for you.`,
-  });
+  if (alarm.name === "zp_daily_check") {
+    await updateReminderBadge();
+    const prefs = await getPrefs();
+    if (!prefs.reminderNotificationEnabled) return;
+    const state = await getState().catch(() => null);
+    if (!state) return;
+    const count = Object.values(state.bookmarks).filter(isDue).length;
+    if (count === 0) return;
+    chrome.notifications.create("zp_reminders", {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: "ZeroPin",
+      message: `${count} reminder${count === 1 ? "" : "s"} waiting for you.`,
+    });
+    return;
+  }
+
+  if (alarm.name === SUMMARY_ALARM_NAME) {
+    const run = await runScheduledSummary().catch(() => null);
+    if (!run) return;
+    if (run.status !== "completed") return;
+    chrome.notifications.create(`zp_summary_${run.id}`, {
+      type: "basic",
+      iconUrl: "icons/icon48.png",
+      title: "ZeroPin Summary Ready",
+      message: `${run.usedSnippetCount} bookmarks summarized across ${run.folderCount} folders.`,
+    });
+  }
 });
 
 chrome.notifications.onClicked.addListener((id) => {
   if (id === "zp_reminders") {
     chrome.tabs.create({ url: chrome.runtime.getURL("library.html") });
     chrome.notifications.clear(id);
+    return;
+  }
+  if (id.startsWith("zp_summary_")) {
+    const summaryId = id.slice("zp_summary_".length);
+    chrome.tabs.create({ url: chrome.runtime.getURL(`library.html?summary=${encodeURIComponent(summaryId)}`) });
+    chrome.notifications.clear(id);
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   void rebuildContextMenus();
   void scheduleOrRefreshDailyAlarm();
+  void scheduleOrRefreshSummaryAlarm();
   void updateReminderBadge();
+
+  if (details.reason === "install") {
+    chrome.tabs.create({ url: chrome.runtime.getURL("walkthrough.html?autoSummarySetup=1") });
+  }
 });
 
 chrome.runtime.onStartup.addListener(() => {
   void rebuildContextMenus();
   void scheduleOrRefreshDailyAlarm();
+  void scheduleOrRefreshSummaryAlarm();
   void updateReminderBadge();
 });
 
@@ -410,6 +448,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
   if (request.type === MSG.REMINDERS_CHANGED) {
     void updateReminderBadge();
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (request.type === MSG.SUMMARY_PREFS_CHANGED) {
+    void scheduleOrRefreshSummaryAlarm();
     sendResponse({ ok: true });
     return false;
   }

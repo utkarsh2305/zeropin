@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTheme } from "../theme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -747,6 +747,19 @@ export default function Walkthrough() {
     if (step > 0) setStep(step - 1);
   };
 
+  const openSummarySetup = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("library.html?onboarding=summary") });
+  };
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search);
+    if (next.get("autoSummarySetup") !== "1") return;
+    next.delete("autoSummarySetup");
+    const nextUrl = `${window.location.pathname}${next.toString() ? `?${next.toString()}` : ""}`;
+    window.history.replaceState({}, "", nextUrl);
+    chrome.tabs.create({ url: chrome.runtime.getURL("library.html?onboarding=summary") });
+  }, []);
+
   return (
     <div className="min-h-screen bg-background flex justify-center p-6">
       <div className="w-180 max-w-[96vw] font-sans">
@@ -790,9 +803,14 @@ export default function Walkthrough() {
         {/* Explanation */}
         <ExplanationPanel scenario={scenario} step={step} onNext={advance} onPrev={goBack} />
 
-        {/* Footer tip */}
-        <div className="mt-6 text-xs text-muted-foreground text-center">
-          Tip: You can also click directly on the browser mockup to advance through steps.
+        {/* Footer actions */}
+        <div className="mt-6 flex flex-col items-center gap-2 text-center">
+          <div className="text-xs text-muted-foreground">
+            Tip: You can also click directly on the browser mockup to advance through steps.
+          </div>
+          <Button size="sm" onClick={openSummarySetup}>
+            Continue to Summary Setup
+          </Button>
         </div>
       </div>
     </div>

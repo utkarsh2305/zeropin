@@ -16,6 +16,23 @@ const DEFAULT_PREFS: Prefs = {
   unreadTrackingEnabled: false,
   unreadThresholdDays: 60,
   defaultPageSize: 50,
+  onboardingCompleted: false,
+  onboardingCompletedAt: undefined,
+  userProfileRole: "",
+  userProfileDescription: "",
+  userIntendedUse: "",
+  summaryByokEnabled: false,
+  summaryProvider: "openai",
+  summaryModel: "",
+  summaryBaseUrl: "",
+  summaryApiKey: "",
+  summaryEnableScheduled: false,
+  summaryFrequency: "weekly",
+  summaryTime: "09:00",
+  summaryStyle: "balanced",
+  summaryInputTokenBudget: 20000,
+  summaryOutputTokenReserve: 3000,
+  summaryMaxUrlsPerFolder: 15,
 };
 
 // ── Return type ───────────────────────────────────────────────────────────────

@@ -38,6 +38,11 @@ describe("getPrefs", () => {
     expect(p.snippetDismissMs).toBe(12000);
     expect(p.reminderNotificationEnabled).toBe(false);
     expect(p.reminderNotificationHour).toBe(9);
+    expect(p.onboardingCompleted).toBe(false);
+    expect(p.summaryFrequency).toBe("weekly");
+    expect(p.summaryInputTokenBudget).toBe(20000);
+    expect(p.summaryOutputTokenReserve).toBe(3000);
+    expect(p.summaryMaxUrlsPerFolder).toBe(15);
   });
 
   it("returns stored values when present", async () => {
@@ -108,5 +113,19 @@ describe("setPrefs", () => {
   it("defaultPageSize falls back to 50 when unset", async () => {
     const p = await getPrefs();
     expect(p.defaultPageSize).toBe(50);
+  });
+
+  it("persists summary provider/model fields", async () => {
+    await setPrefs({
+      summaryByokEnabled: true,
+      summaryProvider: "anthropic",
+      summaryModel: "claude-sonnet-4-5",
+      summaryApiKey: "test-key",
+    });
+    const p = await getPrefs();
+    expect(p.summaryByokEnabled).toBe(true);
+    expect(p.summaryProvider).toBe("anthropic");
+    expect(p.summaryModel).toBe("claude-sonnet-4-5");
+    expect(p.summaryApiKey).toBe("test-key");
   });
 });

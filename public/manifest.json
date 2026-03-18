@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "ZeroPin - Highlight, Save, Done.",
-  "version": "0.4.0",
-  "description": "Save pages, snippets & AI answers to a private library. Highlights saved text on revisit. Tags, folders, reminders & command palette",
-  "permissions": ["contextMenus", "storage", "tabs", "activeTab", "clipboardWrite", "alarms", "notifications"],
+  "name": "ZeroPin - Highlight anything, Save, Done - AI Summaries/Reminders",
+  "version": "0.5.0",
+  "description": "Save pages, snippets & AI answers to a private library. Highlights saved text on revisit. AI to summarize your bookmarks/snippets. Tags, folders, reminders & command palette",
+  "permissions": ["contextMenus", "storage", "tabs", "activeTab", "clipboardWrite", "alarms", "notifications", "tts"],
   "host_permissions": ["*://*/*"],
   "background": {
     "service_worker": "background.js",

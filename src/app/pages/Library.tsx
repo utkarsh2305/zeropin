@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef, useMemo } from "react";
-import { setPrefs } from "../../core/storage/prefs";
+import { setPrefs, type Prefs } from "../../core/storage/prefs";
 import { createTag, deleteTag, recordBookmarkOpen, bulkDeleteBookmarks, bulkMoveBookmarks } from "../../core/storage/local";
 import { suggestTagIds } from "../../core/aiTags";
 import { AI_CHAT_DOMAINS } from "../../core/constants";
+import { isSummaryConfigured, listSummaryRuns, runInstantSummary, type SummaryRun } from "../../core/summaries";
+import { filterLocalVoices, normalizeSummaryForSpeech, splitTextForTts } from "../../core/tts";
 import { useLibraryState } from "../hooks/useLibraryState";
 import { useFolderOps } from "../hooks/useFolderOps";
 import type { ConfirmDialogState } from "../hooks/useFolderOps";
@@ -25,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandInput, CommandList, CommandGroup, CommandItem, CommandSeparator, CommandShortcut } from "@/components/ui/command";
-import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, Funnel, FolderSearch, Link2, Heart, StickyNote, Globe, BookmarkX } from "lucide-react";
+import { Folder as FolderIcon, Sun, Moon, Monitor, MoreVertical, GripVertical, Pencil, X, Check, ChevronDown, ChevronRight, HelpCircle, Plus, Download, Upload, CheckSquare, Trash2, FolderInput, Palette, Tag, Settings, Bell, Funnel, FolderSearch, Link2, Heart, StickyNote, Globe, BookmarkX, Sparkles, Volume2, Play, Pause, Square } from "lucide-react";
 import { BrandIcon } from "../BrandIcon";
 import { useFilterPipeline } from "../hooks/useFilterPipeline";
 import type { DashboardFilter } from "../hooks/useFilterPipeline";
@@ -51,6 +53,54 @@ function relativeTime(ts: number): string {
 function truncate(str: string, max: number): string {
   return str.length > max ? str.slice(0, max) + "\u2026" : str;
 }
+
+type SummaryProvider = Prefs["summaryProvider"];
+
+const PROVIDER_ONBOARDING_HINTS: Record<SummaryProvider, {
+  title: string;
+  keyUrl: string;
+  docsUrl: string;
+  modelExample: string;
+  baseUrlHint: string;
+  steps: string[];
+}> = {
+  openai: {
+    title: "OpenAI-compatible setup",
+    keyUrl: "https://platform.openai.com/api-keys",
+    docsUrl: "https://platform.openai.com/docs/quickstart",
+    modelExample: "gpt-4.1-mini",
+    baseUrlHint: "Leave blank for OpenAI, or set your compatible endpoint.",
+    steps: [
+      "Open the API keys page and create a new secret key.",
+      "Paste the key into API key and set a model ID.",
+      "Keep Base URL empty for OpenAI defaults, or set your compatible provider URL.",
+    ],
+  },
+  anthropic: {
+    title: "Anthropic setup",
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    docsUrl: "https://docs.anthropic.com/en/api/getting-started",
+    modelExample: "claude-sonnet-4-5",
+    baseUrlHint: "Leave blank for Anthropic default API base.",
+    steps: [
+      "Create an API key in the Anthropic Console.",
+      "Paste the key and set a Claude model ID.",
+      "Keep Base URL empty unless you use a custom proxy endpoint.",
+    ],
+  },
+  gemini: {
+    title: "Gemini setup",
+    keyUrl: "https://aistudio.google.com/app/apikey",
+    docsUrl: "https://ai.google.dev/gemini-api/docs",
+    modelExample: "gemini-2.0-flash",
+    baseUrlHint: "Leave blank for Google Generative Language API base.",
+    steps: [
+      "Create an API key in Google AI Studio.",
+      "Paste the key and set a Gemini model ID.",
+      "Keep Base URL empty unless you route requests through your own endpoint.",
+    ],
+  },
+};
 
 /* ─── Drag data helpers ─────────────────────────────────────────── */
 
@@ -567,6 +617,7 @@ function SortableBookmarkItem({
   tagDefs,
   isDark,
   onToggleTags,
+  onSummarize,
   onSaveReminder,
   onToggleFavorite,
   isRenaming,
@@ -591,6 +642,7 @@ function SortableBookmarkItem({
   tagDefs?: Record<string, TagDef>;
   isDark?: boolean;
   onToggleTags?: () => void;
+  onSummarize?: () => void;
   onSaveReminder?: (reminderAt: number | null) => void;
   onToggleFavorite?: () => void;
   isRenaming?: boolean;
@@ -932,6 +984,7 @@ function SortableBookmarkItem({
             <DropdownMenuItem onClick={onRename}>Rename</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleNote}>Notes</DropdownMenuItem>
             <DropdownMenuItem onClick={onToggleTags}>Tags</DropdownMenuItem>
+            {onSummarize && <DropdownMenuItem onClick={onSummarize}>AI Summary</DropdownMenuItem>}
 
             <DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">Delete</DropdownMenuItem>
           </DropdownMenuContent>
@@ -1371,6 +1424,7 @@ type BookmarkListProps = {
   sortBy: SortKey;
   tagDefs: Record<string, TagDef>;
   onSetBookmarkTags: (bookmarkId: string, tagIds: string[]) => void;
+  onSummarizeSnippet?: (bookmarkId: string) => void;
   isDark?: boolean;
   onSaveReminder?: (bookmarkId: string, reminderAt: number | null) => void;
   onToggleFavorite?: (id: string) => void;
@@ -1379,7 +1433,7 @@ type BookmarkListProps = {
   filterKey: string;
 };
 
-function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [], defaultPageSize, filterKey }: BookmarkListProps) {
+function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenameBookmark, onDeleteBookmark, expandedNotes, onSetExpandedNotes, onSetNotes, bulkMode, selectedIds, onToggleSelect, sortBy, tagDefs, onSetBookmarkTags, onSummarizeSnippet, isDark, onSaveReminder, onToggleFavorite, searchFolderIds = [], defaultPageSize, filterKey }: BookmarkListProps) {
   const [collapsedUrls, setCollapsedUrls] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [expandedTags, setExpandedTags] = useState<Record<string, boolean>>({});
@@ -1516,6 +1570,7 @@ function BookmarkList({ bookmarks, activeFolderId, isSearching, folders, onRenam
         tagDefs={tagDefs}
         isDark={isDark}
         onToggleTags={() => setExpandedTags((prev) => ({ ...prev, [b.id]: !prev[b.id] }))}
+        onSummarize={onSummarizeSnippet ? () => onSummarizeSnippet(b.id) : undefined}
         onSaveReminder={onSaveReminder ? (reminderAt) => onSaveReminder(b.id, reminderAt) : undefined}
         onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(b.id) : undefined}
       />
@@ -1720,6 +1775,12 @@ function CommandPalette({
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) close(); else onOpenChange(true); }}>
       <DialogContent className="overflow-hidden p-0 shadow-lg sm:max-w-lg">
+        <DialogHeader className="sr-only">
+          <DialogTitle>Command Palette</DialogTitle>
+          <DialogDescription>
+            Search bookmarks, folders, and quick actions.
+          </DialogDescription>
+        </DialogHeader>
         <Command
           shouldFilter={false}
           className="**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 **:[[cmdk-group]]:px-2 **:[[cmdk-input-wrapper]_svg]:h-5 **:[[cmdk-input-wrapper]_svg]:w-5 **:[[cmdk-input]]:h-12 **:[[cmdk-item]]:px-2 **:[[cmdk-item]]:py-3 **:[[cmdk-item]_svg]:h-5 **:[[cmdk-item]_svg]:w-5"
@@ -1820,13 +1881,15 @@ function CommandPalette({
 
 /* ─── TopBar ────────────────────────────────────────────────────── */
 
-function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings, onOpenCommandPalette }: {
+function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings, onOpenCommandPalette, onOpenSummaries, summariesCount }: {
   onExport: () => void;
   onImport: (file: File) => void;
   bulkMode: boolean;
   onToggleBulk: () => void;
   onOpenSettings: () => void;
   onOpenCommandPalette: () => void;
+  onOpenSummaries: () => void;
+  summariesCount: number;
 }) {
   const { preference, toggle } = useTheme();
 
@@ -1887,6 +1950,19 @@ function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings, on
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" onClick={onOpenSummaries} className="h-9 w-9 relative">
+            <Sparkles size={16} />
+            {summariesCount > 0 && (
+              <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-4 text-center">
+                {summariesCount > 9 ? "9+" : summariesCount}
+              </span>
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Summaries</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <Button variant="ghost" size="icon" onClick={onOpenSettings} className="h-9 w-9">
             <Settings size={16} />
           </Button>
@@ -1899,7 +1975,20 @@ function TopBar({ onExport, onImport, bulkMode, onToggleBulk, onOpenSettings, on
 
 /* ─── BulkActionsBar ───────────────────────────────────────────── */
 
-function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, onMove, onBulkReminder, onBulkAddTags, onBulkRemoveTags, tagDefs }: {
+function BulkActionsBar({
+  count,
+  folders,
+  onSelectAll,
+  onDeselectAll,
+  onDelete,
+  onMove,
+  onBulkReminder,
+  onBulkAddTags,
+  onBulkRemoveTags,
+  onBulkSummarize,
+  summarizeDisabled,
+  tagDefs,
+}: {
   count: number;
   folders: Record<string, import("../../core/types").Folder>;
   onSelectAll: () => void;
@@ -1909,6 +1998,8 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
   onBulkReminder?: (days: number) => void;
   onBulkAddTags?: (tagIds: string[]) => void;
   onBulkRemoveTags?: (tagIds: string[]) => void;
+  onBulkSummarize?: () => void;
+  summarizeDisabled?: boolean;
   tagDefs?: Record<string, TagDef>;
 }) {
   const { isDark } = useTheme();
@@ -2024,6 +2115,18 @@ function BulkActionsBar({ count, folders, onSelectAll, onDeselectAll, onDelete, 
             <DropdownMenuItem onClick={() => onBulkReminder(7)}>In 1 week</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      )}
+      {onBulkSummarize && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={onBulkSummarize}
+          disabled={summarizeDisabled}
+        >
+          <Sparkles size={13} />
+          Summarize
+        </Button>
       )}
       <Button variant="destructive" size="sm" onClick={onDelete}>
         <Trash2 size={14} />
@@ -2209,10 +2312,24 @@ export default function Library() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [summariesOpen, setSummariesOpen] = useState(false);
+  const [summaryRuns, setSummaryRuns] = useState<SummaryRun[]>([]);
+  const [activeSummaryId, setActiveSummaryId] = useState<string | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const [ttsVoices, setTtsVoices] = useState<chrome.tts.TtsVoice[]>([]);
+  const [ttsVoiceName, setTtsVoiceName] = useState("");
+  const [ttsRate, setTtsRate] = useState("1");
+  const [ttsStatus, setTtsStatus] = useState<"idle" | "playing" | "paused">("idle");
+  const [ttsRunId, setTtsRunId] = useState<string | null>(null);
+  const [ttsActiveVoiceName, setTtsActiveVoiceName] = useState("");
+  const [ttsActiveRate, setTtsActiveRate] = useState("");
+  const [ttsAudioTrimmed, setTtsAudioTrimmed] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [activeTagFilters, setActiveTagFilters] = useState<string[]>([]);
   const [tagsExpanded, setTagsExpanded] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDraggingDivider = useRef(false);
+  const ttsSessionRef = useRef(0);
 
   const [remindersCollapsed, setRemindersCollapsed] = useState(false);
   const [dashboardFilter, setDashboardFilter] = useState<DashboardFilter | null>(null);
@@ -2231,6 +2348,82 @@ export default function Library() {
     return () => {
       document.removeEventListener("mousemove", onMouseMove);
       document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    listSummaryRuns().then((runs) => {
+      setSummaryRuns(runs);
+      const params = new URLSearchParams(window.location.search);
+      const summaryParam = params.get("summary");
+      const onboardingParam = params.get("onboarding");
+      if (summaryParam && runs.some((r) => r.id === summaryParam)) {
+        setActiveSummaryId(summaryParam);
+        setSummariesOpen(true);
+      }
+      if (onboardingParam === "summary") {
+        setOnboardingOpen(true);
+        params.delete("onboarding");
+        const next = params.toString();
+        const nextUrl = `${window.location.pathname}${next ? `?${next}` : ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      }
+    });
+
+    const onChanged = (
+      changes: Record<string, chrome.storage.StorageChange>,
+      area: string,
+    ) => {
+      if (area === "local" && changes["zp_summary_runs"]) {
+        const next = changes["zp_summary_runs"].newValue as SummaryRun[] | undefined;
+        setSummaryRuns(Array.isArray(next) ? next : []);
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
+  useEffect(() => {
+    if (!summariesOpen) {
+      ttsSessionRef.current += 1;
+      setTtsStatus("idle");
+      setTtsRunId(null);
+      setTtsAudioTrimmed(false);
+      void chrome.tts.stop();
+      return;
+    }
+
+    void (async () => {
+      try {
+        const voices = await chrome.tts.getVoices();
+        const localVoices = filterLocalVoices(voices);
+        setTtsVoices(localVoices);
+        if (localVoices.length > 0) {
+          const hasCurrent = ttsVoiceName && localVoices.some((v) => v.voiceName === ttsVoiceName);
+          if (!hasCurrent) {
+            setTtsVoiceName(localVoices[0].voiceName ?? "");
+          }
+        }
+      } catch (err) {
+        console.error("Failed loading local TTS voices", err);
+        showToast("Unable to load local TTS voices.", "error");
+      }
+    })();
+  }, [summariesOpen, showToast]);
+
+  useEffect(() => {
+    if (!ttsRunId) return;
+    if (!activeSummaryId || activeSummaryId === ttsRunId) return;
+    ttsSessionRef.current += 1;
+    setTtsStatus("idle");
+    setTtsRunId(null);
+    setTtsAudioTrimmed(false);
+    void chrome.tts.stop();
+  }, [activeSummaryId, ttsRunId]);
+
+  useEffect(() => {
+    return () => {
+      void chrome.tts.stop();
     };
   }, []);
 
@@ -2382,6 +2575,251 @@ export default function Library() {
   } = bookmarkOps;
 
   /* ─── Handlers ─────────────────────────────────────────────── */
+
+  const activeSummary = activeSummaryId
+    ? summaryRuns.find((r) => r.id === activeSummaryId) ?? null
+    : summaryRuns[0] ?? null;
+  const onboardingProviderHint = PROVIDER_ONBOARDING_HINTS[prefsDraft.summaryProvider];
+  const localVoiceOptions = [...ttsVoices]
+    .sort((a, b) => (a.voiceName ?? "").localeCompare(b.voiceName ?? ""))
+    .map((voice) => ({
+      value: voice.voiceName ?? "",
+      label: voice.lang ? `${voice.voiceName} (${voice.lang})` : (voice.voiceName ?? "Unnamed"),
+    }))
+    .filter((voice) => Boolean(voice.value));
+  const isActiveSummarySpeaking =
+    Boolean(activeSummary && ttsRunId === activeSummary.id) && ttsStatus !== "idle";
+  const ttsSettingsPendingRestart =
+    isActiveSummarySpeaking &&
+    ((Boolean(ttsActiveVoiceName) && Boolean(ttsVoiceName) && ttsVoiceName !== ttsActiveVoiceName) ||
+      (Boolean(ttsActiveRate) && ttsRate !== ttsActiveRate));
+
+  const stopTtsPlayback = async () => {
+    ttsSessionRef.current += 1;
+    setTtsStatus("idle");
+    setTtsRunId(null);
+    setTtsAudioTrimmed(false);
+    try {
+      await chrome.tts.stop();
+    } catch {
+      // no-op
+    }
+  };
+
+  const loadLocalVoices = async (): Promise<chrome.tts.TtsVoice[]> => {
+    try {
+      const voices = await chrome.tts.getVoices();
+      const localVoices = filterLocalVoices(voices);
+      setTtsVoices(localVoices);
+      if (localVoices.length === 0) return [];
+      if (!ttsVoiceName || !localVoices.some((v) => v.voiceName === ttsVoiceName)) {
+        setTtsVoiceName(localVoices[0].voiceName ?? "");
+      }
+      return localVoices;
+    } catch (err) {
+      console.error("Failed loading local TTS voices", err);
+      showToast("Unable to load local TTS voices.", "error");
+      return [];
+    }
+  };
+
+  const handlePlaySummaryAudio = async (run: SummaryRun) => {
+    const text = (run.outputText ?? "").trim();
+    if (!text) {
+      showToast("No summary text to play.", "info");
+      return;
+    }
+    const normalized = normalizeSummaryForSpeech(text);
+    if (!normalized.text) {
+      showToast("No summary text to play.", "info");
+      return;
+    }
+    let localVoices = ttsVoices;
+    if (localVoices.length === 0) {
+      localVoices = await loadLocalVoices();
+    }
+    if (localVoices.length === 0) {
+      showToast("No local TTS voices available on this device.", "error");
+      return;
+    }
+    const selectedVoice =
+      localVoices.find((voice) => voice.voiceName === ttsVoiceName) ?? localVoices[0];
+    const chunks = splitTextForTts(normalized.text);
+    if (chunks.length === 0) {
+      showToast("No summary text to play.", "info");
+      return;
+    }
+
+    const session = ttsSessionRef.current + 1;
+    ttsSessionRef.current = session;
+    setTtsStatus("playing");
+    setTtsRunId(run.id);
+    setTtsActiveVoiceName(selectedVoice.voiceName ?? "");
+    setTtsActiveRate(ttsRate);
+    setTtsAudioTrimmed(normalized.wasTrimmed);
+
+    try {
+      await chrome.tts.stop();
+      for (let idx = 0; idx < chunks.length; idx++) {
+        const isLast = idx === chunks.length - 1;
+        await chrome.tts.speak(chunks[idx], {
+          enqueue: idx > 0,
+          voiceName: selectedVoice.voiceName,
+          lang: selectedVoice.lang,
+          rate: Number(ttsRate),
+          desiredEventTypes: ["start", "end", "pause", "resume", "interrupted", "cancelled", "error"],
+          onEvent: (event) => {
+            if (session !== ttsSessionRef.current) return;
+            if (event.type === "pause") setTtsStatus("paused");
+            if (event.type === "resume" || event.type === "start") setTtsStatus("playing");
+            if (event.type === "error") {
+              setTtsStatus("idle");
+              setTtsRunId(null);
+              showToast("TTS playback failed.", "error");
+              return;
+            }
+            if (isLast && (event.type === "end" || event.type === "interrupted" || event.type === "cancelled")) {
+              setTtsStatus("idle");
+              setTtsRunId(null);
+            }
+          },
+        });
+      }
+    } catch (err) {
+      if (session === ttsSessionRef.current) {
+        setTtsStatus("idle");
+        setTtsRunId(null);
+      }
+      console.error("Failed to play summary audio", err);
+      showToast("Failed to play summary audio.", "error");
+    }
+  };
+
+  const handlePauseResumeAudio = async () => {
+    if (!isActiveSummarySpeaking) return;
+    try {
+      if (ttsStatus === "paused") {
+        chrome.tts.resume();
+        setTtsStatus("playing");
+      } else {
+        chrome.tts.pause();
+        setTtsStatus("paused");
+      }
+    } catch (err) {
+      console.error("Failed to toggle TTS pause/resume", err);
+      showToast("Unable to control audio playback.", "error");
+    }
+  };
+
+  const ensureSummaryReady = (): boolean => {
+    if (!isSummaryConfigured(prefsDraft)) {
+      setOnboardingOpen(true);
+      showToast("Complete onboarding + BYOK settings before running summaries.", "info");
+      return false;
+    }
+    return true;
+  };
+
+  const refreshSummaries = async () => {
+    const runs = await listSummaryRuns();
+    setSummaryRuns(runs);
+  };
+
+  const runInstantSummaryForIds = async (
+    bookmarkIds: string[],
+    runType: "bulk" | "single",
+  ) => {
+    if (summaryBusy) return false;
+    if (!ensureSummaryReady()) return false;
+    const validBookmarkIds = bookmarkIds.filter((id) => {
+      const bookmark = state.bookmarks[id];
+      if (!bookmark) return false;
+      if (bookmark.type === "PAGE") return true;
+      return Boolean((bookmark.snippet?.text ?? "").trim());
+    });
+    if (validBookmarkIds.length === 0) {
+      showToast("No supported bookmarks selected for summary.", "info");
+      return false;
+    }
+    setSummaryBusy(true);
+    showToast("Generating AI summary...", "info");
+    try {
+      const run = await runInstantSummary(validBookmarkIds, runType, prefsDraft);
+      await refreshSummaries();
+      setActiveSummaryId(run.id);
+      setSummariesOpen(true);
+      if (run.status === "completed") {
+        showToast("Summary ready.");
+      } else {
+        showToast(run.error || "Summary did not complete.", "error");
+      }
+      return true;
+    } catch (err) {
+      console.error("Instant summary failed", err);
+      showToast("Failed to generate summary", "error");
+      return false;
+    } finally {
+      setSummaryBusy(false);
+    }
+  };
+
+  const handleBulkSummarize = async () => {
+    const didRun = await runInstantSummaryForIds(Array.from(selectedIds), "bulk");
+    if (didRun) {
+      setSelectedIds(new Set());
+      setBulkMode(false);
+    }
+  };
+
+  const handleSingleSnippetSummarize = async (bookmarkId: string) => {
+    await runInstantSummaryForIds([bookmarkId], "single");
+  };
+
+  const completeOnboarding = async () => {
+    const next = {
+      ...prefsDraft,
+      onboardingCompleted: true,
+      onboardingCompletedAt: Date.now(),
+    };
+    await setPrefs(next);
+    setPrefsState(next);
+    setPrefsDraft(next);
+    setOnboardingOpen(false);
+    chrome.runtime.sendMessage({ type: "ZP_SUMMARY_PREFS_CHANGED" }).catch(() => {});
+  };
+
+  const downloadSummaryRun = (run: SummaryRun) => {
+    const stamp = new Date(run.createdAt).toISOString().replace(/[:.]/g, "-");
+    const body = [
+      "ZeroPin Summary",
+      `Run ID: ${run.id}`,
+      `Created: ${new Date(run.createdAt).toLocaleString()}`,
+      `Run Type: ${run.runType}`,
+      `Status: ${run.status}`,
+      `Provider: ${run.provider}`,
+      `Model: ${run.model || "n/a"}`,
+      `Folders: ${run.folderCount}`,
+      `Inputs: ${run.usedSnippetCount}/${run.snippetCount}`,
+      `Estimated Input Tokens: ${run.estimatedInputTokens}`,
+      "",
+      "Summary Output",
+      "==============",
+      run.outputText || "No summary output available.",
+      "",
+      run.error ? `Error: ${run.error}` : "",
+    ].join("\n");
+
+    const blob = new Blob([body], { type: "text/plain;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `zeropin-summary-${stamp}-${run.runType}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+    showToast("Summary downloaded.");
+  };
 
   const handleDeleteTag = async (tagId: string) => {
     try {
@@ -2667,6 +3105,8 @@ export default function Library() {
                     setSettingsOpen(true);
                   }}
                   onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+                  onOpenSummaries={() => setSummariesOpen(true)}
+                  summariesCount={summaryRuns.length}
                 />
               </div>
             </div>
@@ -2813,6 +3253,7 @@ export default function Library() {
                 sortBy={sortBy}
                 tagDefs={state.tagDefs ?? {}}
                 onSetBookmarkTags={handleSetBookmarkTags}
+                onSummarizeSnippet={handleSingleSnippetSummarize}
                 isDark={isDark}
                 onSaveReminder={handleSaveReminderDirect}
                 onToggleFavorite={handleToggleFavorite}
@@ -2863,6 +3304,8 @@ export default function Library() {
             onBulkReminder={handleBulkSetReminder}
             onBulkAddTags={handleBulkAddTags}
             onBulkRemoveTags={handleBulkRemoveTags}
+            onBulkSummarize={handleBulkSummarize}
+            summarizeDisabled={summaryBusy}
             tagDefs={state.tagDefs ?? {}}
           />
         )}
@@ -2934,7 +3377,7 @@ export default function Library() {
 
         {/* Settings dialog */}
         <Dialog open={settingsOpen} onOpenChange={(open) => { if (!open) setSettingsOpen(false); }}>
-          <DialogContent className="sm:max-w-sm">
+          <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Settings</DialogTitle>
               <DialogDescription>Adjust ZeroPin behaviour preferences.</DialogDescription>
@@ -2952,7 +3395,7 @@ export default function Library() {
                   onChange={(e) => setPrefsDraft((d) => ({ ...d, highlightDurationMs: Number(e.target.value) }))}
                   className="w-full accent-primary"
                 />
-                <p className="text-xs text-muted-foreground">How long text stays highlighted after opening a snippet (1–10 s).</p>
+                <p className="text-xs text-muted-foreground">How long text stays highlighted after opening a snippet (1-10 s).</p>
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
@@ -2966,7 +3409,7 @@ export default function Library() {
                   onChange={(e) => setPrefsDraft((d) => ({ ...d, snippetDismissMs: Number(e.target.value) }))}
                   className="w-full accent-primary"
                 />
-                <p className="text-xs text-muted-foreground">How long the save-snippet card stays visible on AI pages (5–30 s).</p>
+                <p className="text-xs text-muted-foreground">How long the save-snippet card stays visible on AI pages (5-30 s).</p>
               </div>
               <div className="space-y-2 border-t border-border pt-4">
                 <p className="text-sm font-medium">Library display</p>
@@ -3016,14 +3459,597 @@ export default function Library() {
                 )}
                 <p className="text-xs text-muted-foreground">When enabled, ZeroPin sends one daily OS notification if you have due reminders. The Reminders section in the library is always available regardless of this setting.</p>
               </div>
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Summary & AI</p>
+                  <div className="flex items-center gap-2">
+                    {!prefsDraft.onboardingCompleted && (
+                      <Badge variant="outline" className="text-[10px]">Setup required</Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Your role</label>
+                    <Input
+                      value={prefsDraft.userProfileRole}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, userProfileRole: e.target.value }))}
+                      placeholder="e.g. Product Manager"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Intended use</label>
+                    <Input
+                      value={prefsDraft.userIntendedUse}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, userIntendedUse: e.target.value }))}
+                      placeholder="e.g. Weekly research recap"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Profile/context for summarization</label>
+                  <textarea
+                    value={prefsDraft.userProfileDescription}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, userProfileDescription: e.target.value }))}
+                    className="w-full border border-input rounded-md text-sm font-sans min-h-16 bg-background text-foreground resize-y p-2"
+                    placeholder="What you do, priorities, and what matters in summaries..."
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={prefsDraft.summaryByokEnabled}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryByokEnabled: e.target.checked }))}
+                    className="cursor-pointer"
+                  />
+                  Enable BYOK summary API
+                </label>
+                {prefsDraft.summaryByokEnabled && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Provider</label>
+                        <Select
+                          value={prefsDraft.summaryProvider}
+                          onValueChange={(v) => setPrefsDraft((d) => ({ ...d, summaryProvider: v as "openai" | "anthropic" | "gemini" }))}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="openai">OpenAI-compatible</SelectItem>
+                            <SelectItem value="anthropic">Anthropic</SelectItem>
+                            <SelectItem value="gemini">Gemini</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Model</label>
+                        <Input
+                          value={prefsDraft.summaryModel}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryModel: e.target.value }))}
+                          placeholder="e.g. gpt-4.1-mini"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">API key</label>
+                        <Input
+                          type="password"
+                          value={prefsDraft.summaryApiKey}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryApiKey: e.target.value }))}
+                          placeholder="sk-..."
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Base URL (optional)</label>
+                        <Input
+                          value={prefsDraft.summaryBaseUrl}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryBaseUrl: e.target.value }))}
+                          placeholder="https://api.openai.com/v1"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Style</label>
+                        <Select
+                          value={prefsDraft.summaryStyle}
+                          onValueChange={(v) => setPrefsDraft((d) => ({ ...d, summaryStyle: v as "concise" | "balanced" | "detailed" }))}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="concise">Concise</SelectItem>
+                            <SelectItem value="balanced">Balanced</SelectItem>
+                            <SelectItem value="detailed">Detailed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Input token cap</label>
+                        <Input
+                          type="number"
+                          min={2000}
+                          value={prefsDraft.summaryInputTokenBudget}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryInputTokenBudget: Number(e.target.value || 0) }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Output reserve</label>
+                        <Input
+                          type="number"
+                          min={500}
+                          value={prefsDraft.summaryOutputTokenReserve}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryOutputTokenReserve: Number(e.target.value || 0) }))}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Security: your API key is stored only on this device in local extension storage. ZeroPin does not run a backend and does not collect or share your key.
+                    </p>
+                  </div>
+                )}
+                <div className="space-y-2 border-t border-border pt-3">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={prefsDraft.summaryEnableScheduled}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryEnableScheduled: e.target.checked }))}
+                      className="cursor-pointer"
+                    />
+                    Enable automated summaries
+                  </label>
+                  {prefsDraft.summaryEnableScheduled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Cadence</label>
+                        <Select
+                          value={prefsDraft.summaryFrequency}
+                          onValueChange={(v) => setPrefsDraft((d) => ({ ...d, summaryFrequency: v as "daily" | "weekly" | "biweekly" }))}
+                        >
+                          <SelectTrigger className="h-9 text-sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="daily">Daily</SelectItem>
+                            <SelectItem value="weekly">Weekly</SelectItem>
+                            <SelectItem value="biweekly">Biweekly</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Run at</label>
+                        <Input
+                          type="time"
+                          value={prefsDraft.summaryTime}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryTime: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Max URLs/folder</label>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={50}
+                          value={prefsDraft.summaryMaxUrlsPerFolder}
+                          onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryMaxUrlsPerFolder: Number(e.target.value || 0) }))}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <Button variant="outline" onClick={() => setSettingsOpen(false)}>Cancel</Button>
               <Button onClick={async () => {
-                await setPrefs(prefsDraft);
-                setPrefsState(prefsDraft);
+                const canFinalizeOnboarding = Boolean(
+                  prefsDraft.userProfileRole.trim() &&
+                  prefsDraft.userIntendedUse.trim() &&
+                  (
+                    !prefsDraft.summaryByokEnabled ||
+                    (prefsDraft.summaryApiKey.trim() && prefsDraft.summaryModel.trim())
+                  )
+                );
+                const nextPrefs = (prefsDraft.onboardingCompleted || canFinalizeOnboarding)
+                  ? {
+                    ...prefsDraft,
+                    onboardingCompleted: true,
+                    onboardingCompletedAt: prefsDraft.onboardingCompletedAt ?? Date.now(),
+                  }
+                  : prefsDraft;
+                await setPrefs(nextPrefs);
+                setPrefsState(nextPrefs);
+                setPrefsDraft(nextPrefs);
+                chrome.runtime.sendMessage({ type: "ZP_SUMMARY_PREFS_CHANGED" }).catch(() => {});
                 setSettingsOpen(false);
+                if (prefsDraft.summaryByokEnabled && prefsDraft.summaryApiKey.trim()) {
+                  showToast("Settings saved. Your BYOK key stays local on this device.");
+                }
               }}>Save</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={onboardingOpen} onOpenChange={setOnboardingOpen}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>ZeroPin Summary Setup</DialogTitle>
+              <DialogDescription>
+                Tell ZeroPin about you, how you use saved bookmarks/snippets, and your BYOK model settings.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                ZeroPin stores your bookmarks/snippets locally. Summary generation uses your BYOK key and sends selected summary context +
+                URL excerpts to your provider.
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Your role</label>
+                  <Input
+                    value={prefsDraft.userProfileRole}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, userProfileRole: e.target.value }))}
+                    placeholder="e.g. Engineer, Founder, Student"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Intended summary use</label>
+                  <Input
+                    value={prefsDraft.userIntendedUse}
+                    onChange={(e) => setPrefsDraft((d) => ({ ...d, userIntendedUse: e.target.value }))}
+                    placeholder="e.g. weekly research debrief"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Profile/context</label>
+                <textarea
+                  value={prefsDraft.userProfileDescription}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, userProfileDescription: e.target.value }))}
+                  className="w-full border border-input rounded-md text-sm font-sans min-h-20 bg-background text-foreground resize-y p-2"
+                  placeholder="What topics matter most? What should the summary prioritize?"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Max URLs/folder</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={prefsDraft.summaryMaxUrlsPerFolder}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryMaxUrlsPerFolder: Number(e.target.value || 0) }))}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={prefsDraft.summaryByokEnabled}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryByokEnabled: e.target.checked }))}
+                  className="cursor-pointer"
+                />
+                Enable BYOK API for summaries
+              </label>
+              {prefsDraft.summaryByokEnabled && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Provider</label>
+                      <Select
+                        value={prefsDraft.summaryProvider}
+                        onValueChange={(v) => setPrefsDraft((d) => ({ ...d, summaryProvider: v as "openai" | "anthropic" | "gemini" }))}
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="openai">OpenAI-compatible</SelectItem>
+                          <SelectItem value="anthropic">Anthropic</SelectItem>
+                          <SelectItem value="gemini">Gemini</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Model</label>
+                      <Input
+                        value={prefsDraft.summaryModel}
+                        onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryModel: e.target.value }))}
+                        placeholder="Model ID"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">API key</label>
+                      <Input
+                        type="password"
+                        value={prefsDraft.summaryApiKey}
+                        onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryApiKey: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-muted-foreground">Base URL (optional)</label>
+                      <Input
+                        value={prefsDraft.summaryBaseUrl}
+                        onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryBaseUrl: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1.5">
+                    <p className="font-medium text-foreground">{onboardingProviderHint.title}</p>
+                    <p>
+                      Suggested model: <span className="font-mono">{onboardingProviderHint.modelExample}</span>
+                    </p>
+                    <p>{onboardingProviderHint.baseUrlHint}</p>
+                    <ol className="list-decimal pl-4 space-y-0.5">
+                      {onboardingProviderHint.steps.map((step, idx) => (
+                        <li key={`${onboardingProviderHint.title}-${idx}`}>{step}</li>
+                      ))}
+                    </ol>
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <a className="underline underline-offset-2 hover:text-foreground" href={onboardingProviderHint.keyUrl} target="_blank" rel="noreferrer">
+                        Open key page
+                      </a>
+                      <a className="underline underline-offset-2 hover:text-foreground" href={onboardingProviderHint.docsUrl} target="_blank" rel="noreferrer">
+                        Open provider docs
+                      </a>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Security: your API key is stored only on this device in local extension storage. ZeroPin does not run a backend and does not collect or share your key.
+                  </p>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={prefsDraft.summaryEnableScheduled}
+                  onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryEnableScheduled: e.target.checked }))}
+                  className="cursor-pointer"
+                />
+                Enable scheduled summaries
+              </label>
+              {prefsDraft.summaryEnableScheduled && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Cadence</label>
+                    <Select
+                      value={prefsDraft.summaryFrequency}
+                      onValueChange={(v) => setPrefsDraft((d) => ({ ...d, summaryFrequency: v as "daily" | "weekly" | "biweekly" }))}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="biweekly">Biweekly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Automated run time</label>
+                    <Input
+                      type="time"
+                      value={prefsDraft.summaryTime}
+                      onChange={(e) => setPrefsDraft((d) => ({ ...d, summaryTime: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-2">
+              <Button variant="outline" onClick={() => setOnboardingOpen(false)}>Later</Button>
+              <Button
+                onClick={async () => {
+                  if (!prefsDraft.userProfileRole.trim() || !prefsDraft.userIntendedUse.trim()) {
+                    showToast("Role and intended use are required for onboarding.", "error");
+                    return;
+                  }
+                  if (prefsDraft.summaryByokEnabled && (!prefsDraft.summaryApiKey.trim() || !prefsDraft.summaryModel.trim())) {
+                    showToast("Provide BYOK API key and model.", "error");
+                    return;
+                  }
+                  await completeOnboarding();
+                  if (prefsDraft.summaryByokEnabled && prefsDraft.summaryApiKey.trim()) {
+                    showToast("Onboarding saved. Your BYOK key stays local on this device.");
+                  } else {
+                    showToast("Onboarding saved.");
+                  }
+                }}
+              >
+                Complete Setup
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={summariesOpen} onOpenChange={setSummariesOpen}>
+          <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Summary Runs</DialogTitle>
+              <DialogDescription>
+                Scheduled and instant AI summaries generated from your bookmarks/snippets. ZeroPin keeps the latest 3 runs.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3 py-1">
+              <div className="border border-border rounded-md overflow-hidden">
+                <div className="px-3 py-2 border-b border-border text-sm font-medium">History</div>
+                <div className="max-h-[55vh] overflow-y-auto">
+                  {summaryRuns.length === 0 && (
+                    <p className="p-3 text-sm text-muted-foreground">No summaries yet.</p>
+                  )}
+                  {summaryRuns.map((run) => (
+                    <button
+                      key={run.id}
+                      onClick={() => setActiveSummaryId(run.id)}
+                      className={cn(
+                        "w-full text-left px-3 py-2 border-b border-border/60 hover:bg-accent transition-colors",
+                        activeSummary?.id === run.id && "bg-primary/10"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium uppercase tracking-wide">{run.runType}</span>
+                        <Badge variant="outline" className="text-[10px]">{run.status}</Badge>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {new Date(run.createdAt).toLocaleString()}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {run.usedSnippetCount}/{run.snippetCount} inputs
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="border border-border rounded-md">
+                {!activeSummary ? (
+                  <div className="p-4 text-sm text-muted-foreground">Select a run to view details.</div>
+                ) : (
+                  <div className="p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold">{activeSummary.runType.toUpperCase()} Summary</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(activeSummary.createdAt).toLocaleString()} • {activeSummary.provider} • {activeSummary.model || "model n/a"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => downloadSummaryRun(activeSummary)}
+                          className="h-8"
+                        >
+                          <Download size={14} className="mr-1.5" />
+                          Download .txt
+                        </Button>
+                        <Badge variant="outline">{activeSummary.status}</Badge>
+                      </div>
+                    </div>
+                    <div className="rounded border border-border p-2.5 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="inline-flex items-center gap-1.5 text-xs text-muted-foreground mr-1">
+                          <Volume2 size={14} />
+                          Listen
+                        </div>
+                        <Select
+                          value={ttsVoiceName || (localVoiceOptions[0]?.value ?? "")}
+                          onValueChange={setTtsVoiceName}
+                          disabled={localVoiceOptions.length === 0 || activeSummary.status !== "completed"}
+                        >
+                          <SelectTrigger className="h-8 w-[240px]">
+                            <SelectValue placeholder={localVoiceOptions.length ? "Select voice" : "No local voices"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {localVoiceOptions.map((voice) => (
+                              <SelectItem key={voice.value} value={voice.value}>
+                                {voice.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={ttsRate}
+                          onValueChange={setTtsRate}
+                          disabled={activeSummary.status !== "completed"}
+                        >
+                          <SelectTrigger className="h-8 w-[100px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0.9">0.9x</SelectItem>
+                            <SelectItem value="1">1.0x</SelectItem>
+                            <SelectItem value="1.15">1.15x</SelectItem>
+                            <SelectItem value="1.3">1.3x</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => { void handlePlaySummaryAudio(activeSummary); }}
+                          disabled={!activeSummary.outputText?.trim() || activeSummary.status !== "completed"}
+                        >
+                          <Play size={14} className="mr-1.5" />
+                          {isActiveSummarySpeaking ? "Restart" : "Play"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => { void handlePauseResumeAudio(); }}
+                          disabled={!isActiveSummarySpeaking}
+                        >
+                          {ttsStatus === "paused" ? (
+                            <>
+                              <Play size={14} className="mr-1.5" />
+                              Resume
+                            </>
+                          ) : (
+                            <>
+                              <Pause size={14} className="mr-1.5" />
+                              Pause
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => { void stopTtsPlayback(); }}
+                          disabled={!isActiveSummarySpeaking}
+                        >
+                          <Square size={14} className="mr-1.5" />
+                          Stop
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Local voices only (remote voices are excluded). Voice/speed changes apply on Restart.
+                      </p>
+                      {ttsSettingsPendingRestart && (
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                          Voice or speed changed during playback. Click Restart to apply updates.
+                        </p>
+                      )}
+                      {ttsAudioTrimmed && (
+                        <p className="text-xs text-muted-foreground">
+                          Audio playback uses a shortened clean-text narration for better listening.
+                        </p>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="rounded border border-border p-2">
+                        <div className="text-muted-foreground">Folders</div>
+                        <div className="font-medium">{activeSummary.folderCount}</div>
+                      </div>
+                      <div className="rounded border border-border p-2">
+                        <div className="text-muted-foreground">Inputs</div>
+                        <div className="font-medium">{activeSummary.usedSnippetCount}/{activeSummary.snippetCount}</div>
+                      </div>
+                      <div className="rounded border border-border p-2">
+                        <div className="text-muted-foreground">Input est.</div>
+                        <div className="font-medium">{activeSummary.estimatedInputTokens}</div>
+                      </div>
+                      <div className="rounded border border-border p-2">
+                        <div className="text-muted-foreground">Skipped URLs</div>
+                        <div className="font-medium">{activeSummary.skippedUrls.length}</div>
+                      </div>
+                    </div>
+                    {activeSummary.error && (
+                      <div className="rounded border border-destructive/40 bg-destructive/10 p-2 text-sm text-destructive">
+                        {activeSummary.error}
+                      </div>
+                    )}
+                    <div className="rounded border border-border bg-muted/30 p-3">
+                      <pre className="whitespace-pre-wrap text-sm text-foreground font-sans">
+                        {activeSummary.outputText || "No summary output available."}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </DialogContent>
         </Dialog>
